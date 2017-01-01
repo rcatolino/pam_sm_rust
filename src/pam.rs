@@ -27,7 +27,6 @@ impl Pam {
         // which make this safe
         unsafe {
             let pointer = try!(self.get_item(PamItemType::AUTHTOK));
-            println!("Got pointer : {:?}", pointer);
             Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
@@ -89,42 +88,36 @@ thread_local! {
 #[no_mangle]
 pub extern "C" fn pam_sm_open_session(pamh: Pam, flags: PamFlag,
                            argc: size_t, argv: *const u8) -> PamReturnCode {
-    println!("In pam_sm_open_session");
     return PAMSM.with(|sm| sm.open_session(pamh, flags, argc, argv));
 }
 
 #[no_mangle]
 pub extern "C" fn pam_sm_close_session(pamh: Pam, flags: PamFlag,
                             argc: size_t, argv: *const u8) -> PamReturnCode {
-    println!("In pam_sm_close_session");
     return PAMSM.with(|sm| sm.close_session(pamh, flags, argc, argv));
 }
 
 #[no_mangle]
 pub extern "C" fn pam_sm_authenticate(pamh: Pam, flags: PamFlag,
                                       argc: size_t, argv: *const *const u8) -> PamReturnCode {
-    println!("In pam_sm_authenticate");
     return PAMSM.with(|sm| sm.authenticate(pamh, flags, argc, argv));
 }
 
 #[no_mangle]
 pub extern "C" fn pam_sm_setcred(pamh: Pam, flags: PamFlag,
                       argc: size_t, argv: *const u8) -> PamReturnCode {
-    println!("In pam_sm_setcred");
     return PAMSM.with(|sm| sm.setcred(pamh, flags, argc, argv));
 }
 
 #[no_mangle]
 pub extern "C" fn pam_sm_acct_mgmt(pamh: Pam, flags: PamFlag,
                         argc: size_t, argv: *const u8) -> PamReturnCode {
-    println!("In pam_sm_acct_mgmt");
     return PAMSM.with(|sm| sm.acct_mgmt(pamh, flags, argc, argv));
 }
 
 #[no_mangle]
 pub extern "C" fn pam_sm_chauthtok(pamh: Pam, flags: PamFlag,
                         argc: size_t, argv: *const u8) -> PamReturnCode {
-    println!("In pam_sm_chauthtok");
     return PAMSM.with(|sm| sm.chauthtok(pamh, flags, argc, argv));
 }
 
