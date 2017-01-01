@@ -1,0 +1,8 @@
+[package]
+name = "pam_sm"
+version = "0.1.0"
+authors = ["Raphael Catolino <raphael.catolino@gmail.com>"]
+
+[dependencies]
+pam-sys = "0.4.1"
+libc = "0.2.18"
