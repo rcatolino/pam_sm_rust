@@ -1,3 +1,5 @@
+// Copyright (c) 2017 raphael.catolino@gmail.com
+
 pub use pam_sys::types::{PamFlag, PamReturnCode};
 use libc::{c_void, size_t};
 use pam_sys::types::{PamHandle, PamItemType};
@@ -7,9 +9,9 @@ use std::ptr;
 use std::ffi::CStr;
 use std::str::Utf8Error;
 
+/// Opaque PAM handle
 pub struct Pam(*mut PamHandle);
 
-// Pam functions
 impl Pam {
     unsafe fn get_item(&self, item_type: PamItemType) -> Result<Option<*const c_void>, PamReturnCode> {
         let mut raw_item : *const c_void = ptr::null();
@@ -23,6 +25,7 @@ impl Pam {
         }
     }
 
+    /// Get the cached authentication token.
     pub fn get_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamReturnCode> {
         // Pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
@@ -31,16 +34,12 @@ impl Pam {
             Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
-
-    /*
-    pub fn set_item(&self, item_type: PamItemType, item: *const c_void) -> PamReturnCode {
-    }
-    */
 }
 
-/// Default service module implementation
-/// always returns SERVICE_ERR
-/// You should override functions depending on what kind of module you implement
+/// Default service module implementation.
+/// All default functions return SERVICE_ERR.
+/// You can override functions depending on what kind of module you implement.
+/// See the respective pam_sm_* man pages for documentation.
 pub trait PamServiceModule {
     fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
         PamReturnCode::SERVICE_ERR
@@ -67,8 +66,8 @@ pub trait PamServiceModule {
     }
 }
 
-/// You have to implement a get_pam_sm function that returns a boxed PamServiceModule
-/// implementation
+/// You must implement a get_pam_sm function that returns a Box<PamServiceModule>
+/// This PamServiceModule implementation should override the functions you need in your module
 #[allow(improper_ctypes)]
 extern {
     #[no_mangle]
@@ -90,6 +89,7 @@ unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<Strin
 macro_rules! pam_callback {
     ($pam_cb:ident, $rust_cb:ident) => {
         #[no_mangle]
+        #[doc(hidden)]
         pub extern "C" fn $pam_cb(pamh: Pam, flags: PamFlag,
                                    argc: size_t, argv: *const *const u8) -> PamReturnCode {
             match unsafe { extract_args(argc, argv) } {
