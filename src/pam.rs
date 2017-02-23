@@ -1,24 +1,22 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
-pub use pam_sys::types::{PamFlag, PamReturnCode};
 use libc::{c_void, size_t};
-use pam_sys::types::{PamHandle, PamItemType};
-use pam_sys::wrapped::{get_item};
+use pam_raw::{PamFlag, PamHandle, PamItemType, PamResult, get_item};
 use std::os::raw::c_char;
 use std::ptr;
 use std::ffi::CStr;
 use std::str::Utf8Error;
 
 /// Opaque PAM handle
-pub struct Pam(*mut PamHandle);
+pub struct Pam(PamHandle);
 
 impl Pam {
-    unsafe fn get_item(&self, item_type: PamItemType) -> Result<Option<*const c_void>, PamReturnCode> {
+    unsafe fn get_item(&self, item_type: PamItemType) -> Result<Option<*const c_void>, PamResult> {
         let mut raw_item : *const c_void = ptr::null();
         let result = get_item(self.0, item_type, &mut raw_item);
-        if result == PamReturnCode::SUCCESS && !raw_item.is_null() {
+        if result == PamResult::SUCCESS && !raw_item.is_null() {
             Ok(Some(raw_item))
-        } else if result == PamReturnCode::SUCCESS && raw_item.is_null() {
+        } else if result == PamResult::SUCCESS && raw_item.is_null() {
             Ok(None)
         } else {
             Err(result)
@@ -26,14 +24,25 @@ impl Pam {
     }
 
     /// Get the cached authentication token.
-    pub fn get_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamReturnCode> {
-        // Pam should keep the underlying token allocated for as long as the module is loaded
+    pub fn get_cached_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamResult> {
+        // pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
         unsafe {
             let pointer = try!(self.get_item(PamItemType::AUTHTOK));
             Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
+
+    /*
+    /// Get the cached authentication token or prompt the user for one if there isn't any
+    pub fn get_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamResult> {
+        // pam should keep the underlying token allocated for as long as the module is loaded
+        // which make this safe
+        unsafe {
+            let result = get_item(self.0, item_type, &mut raw_item);
+        }
+    }
+    */
 }
 
 /// Default service module implementation.
@@ -41,28 +50,28 @@ impl Pam {
 /// You can override functions depending on what kind of module you implement.
 /// See the respective pam_sm_* man pages for documentation.
 pub trait PamServiceModule {
-    fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 
-    fn close_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn close_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 
-    fn authenticate(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn authenticate(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 
-    fn setcred(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn setcred(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 
-    fn acct_mgmt(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn acct_mgmt(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 
-    fn chauthtok(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamReturnCode {
-        PamReturnCode::SERVICE_ERR
+    fn chauthtok(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
+        PamResult::SERVICE_ERR
     }
 }
 
@@ -91,10 +100,10 @@ macro_rules! pam_callback {
         #[no_mangle]
         #[doc(hidden)]
         pub extern "C" fn $pam_cb(pamh: Pam, flags: PamFlag,
-                                   argc: size_t, argv: *const *const u8) -> PamReturnCode {
+                                   argc: size_t, argv: *const *const u8) -> PamResult {
             match unsafe { extract_args(argc, argv) } {
                 Ok(args) => PAMSM.with(|sm| sm.$rust_cb(pamh, flags, args)),
-                Err(_) => PamReturnCode::SERVICE_ERR,
+                Err(_) => PamResult::SERVICE_ERR,
             }
         }
     }

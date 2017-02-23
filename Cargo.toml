@@ -7,5 +7,4 @@ license = "GPLv3"
 homepage = "https://github.com/rcatolino/pam_sm_rust"
 
 [dependencies]
-pam-sys = "0.4.1"
 libc = "0.2.19"

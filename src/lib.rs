@@ -7,18 +7,18 @@
 //! extern crate pamsm;
 //! extern crate time;
 //!
-//! use pamsm::{PamServiceModule, Pam, PamFlag, PamReturnCode};
+//! use pamsm::{PamServiceModule, Pam, PamFlag, PamResult};
 //!
 //! struct PamTime;
 //!
 //! impl PamServiceModule for PamTime {
-//!     fn authenticate(self: &Self, pamh: Pam, _: PamFlag, args: Vec<String>) -> PamReturnCode {
+//!     fn authenticate(self: &Self, pamh: Pam, _: PamFlag, args: Vec<String>) -> PamResult {
 //!         let hour = time::now().tm_hour;
 //!         if hour != 4 {
 //!             // Only allow authentication when it's 4 AM
-//!             PamReturnCode::SUCCESS;
+//!             PamResult::SUCCESS;
 //!         } else {
-//!             PamReturnCode::AUTH_ERR;
+//!             PamResult::AUTH_ERR;
 //!         }
 //!     }
 //! }
@@ -29,8 +29,8 @@
 //! }
 //! ```
 
-extern crate pam_sys;
 extern crate libc;
 
 mod pam;
+mod pam_raw;
 pub use self::pam::*;
