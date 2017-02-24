@@ -1,48 +1,34 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
-use libc::{c_void, size_t};
-use pam_raw::{PamFlag, PamHandle, PamItemType, PamResult, get_item};
+use libc::{size_t};
+use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_item, get_authtok};
 use std::os::raw::c_char;
-use std::ptr;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::str::Utf8Error;
 
 /// Opaque PAM handle
 pub struct Pam(PamHandle);
 
 impl Pam {
-    unsafe fn get_item(&self, item_type: PamItemType) -> Result<Option<*const c_void>, PamResult> {
-        let mut raw_item : *const c_void = ptr::null();
-        let result = get_item(self.0, item_type, &mut raw_item);
-        if result == PamResult::SUCCESS && !raw_item.is_null() {
-            Ok(Some(raw_item))
-        } else if result == PamResult::SUCCESS && raw_item.is_null() {
-            Ok(None)
-        } else {
-            Err(result)
-        }
-    }
-
     /// Get the cached authentication token.
-    pub fn get_cached_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamResult> {
+    pub fn get_cached_authtok<'a>(&self) -> PamResult<Option<&'a CStr>> {
         // pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
         unsafe {
-            let pointer = try!(self.get_item(PamItemType::AUTHTOK));
+            let pointer = try!(get_item(self.0, PamItemType::AUTHTOK));
             Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
 
-    /*
     /// Get the cached authentication token or prompt the user for one if there isn't any
-    pub fn get_authtok<'a>(&self) -> Result<Option<&'a CStr>, PamResult> {
-        // pam should keep the underlying token allocated for as long as the module is loaded
-        // which make this safe
+    pub fn get_authtok<'a>(&self, prompt: Option<&str>) -> PamResult<Option<&'a CStr>> {
+        let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
+        let result = try!(get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr())));
+        // If result is Ok we're guaranteed that p is a valid pointer
         unsafe {
-            let result = get_item(self.0, item_type, &mut raw_item);
+            Ok(result.map(|p| CStr::from_ptr(p)))
         }
     }
-    */
 }
 
 /// Default service module implementation.
@@ -50,28 +36,28 @@ impl Pam {
 /// You can override functions depending on what kind of module you implement.
 /// See the respective pam_sm_* man pages for documentation.
 pub trait PamServiceModule {
-    fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 
-    fn close_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn close_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 
-    fn authenticate(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn authenticate(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 
-    fn setcred(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn setcred(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 
-    fn acct_mgmt(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn acct_mgmt(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 
-    fn chauthtok(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamResult {
-        PamResult::SERVICE_ERR
+    fn chauthtok(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+        PamError::SERVICE_ERR
     }
 }
 
@@ -100,10 +86,10 @@ macro_rules! pam_callback {
         #[no_mangle]
         #[doc(hidden)]
         pub extern "C" fn $pam_cb(pamh: Pam, flags: PamFlag,
-                                   argc: size_t, argv: *const *const u8) -> PamResult {
+                                   argc: size_t, argv: *const *const u8) -> PamError {
             match unsafe { extract_args(argc, argv) } {
                 Ok(args) => PAMSM.with(|sm| sm.$rust_cb(pamh, flags, args)),
-                Err(_) => PamResult::SERVICE_ERR,
+                Err(_) => PamError::SERVICE_ERR,
             }
         }
     }

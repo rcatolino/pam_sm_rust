@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
+use std::ptr;
 use std::ptr::write_volatile;
 use std::option::Option;
 use libc::{c_char, c_int, c_uint, c_void, free, strlen};
@@ -20,7 +21,7 @@ pub enum PamMsgStyle {
 
 /*
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PamResult {
+pub enum PamError {
      SUCCESS    = 0,		/* Successful function return */
      OPEN_ERR   = 1,		/* dlopen() failure when dynamically */
      SYMBOL_ERR     = 2,	/* Symbol not found */
@@ -78,7 +79,7 @@ macro_rules! i32_enum {
 }
 
 i32_enum! {
-    PamResult (UNKNOWN_RESULT = -1) {
+    PamError (UNKNOWN_RESULT = -1) {
         SUCCESS    = 0,		/* Successful function return */
         OPEN_ERR   = 1,		/* dlopen() failure when dynamically */
         SYMBOL_ERR     = 2,	/* Symbol not found */
@@ -114,45 +115,6 @@ i32_enum! {
     }
 }
 
-//#[derive(Clone, Copy, Debug, PartialEq)]
-//pub enum PamResult {
-/*
-i32_enum! {
-         SUCCESS    = 0,		/* Successful function return */
-         OPEN_ERR   = 1,		/* dlopen() failure when dynamically */
-         SYMBOL_ERR     = 2,	/* Symbol not found */
-         SERVICE_ERR    = 3,	/* Error in service module */
-         SYSTEM_ERR     = 4,	/* System error */
-         BUF_ERR    = 5,		/* Memory buffer error */
-         PERM_DENIED    = 6,	/* Permission denied */
-         AUTH_ERR   = 7,		/* Authentication failure */
-         CRED_INSUFFICIENT  = 8,	/* Can not access authentication data */
-         AUTHINFO_UNAVAIL   = 9,	/* Underlying authentication service can not retrieve authentication information  */
-         USER_UNKNOWN   = 10,	/* User not known to the underlying authenticaiton module */
-         MAXTRIES   = 11,		/* An authentication service has maintained a retry count which has been reached. No further retries should be attempted */
-         NEW_AUTHTOK_REQD   = 12,	/* New authentication token required. */
-         ACCT_EXPIRED   = 13,	/* User account has expired */
-         SESSION_ERR    = 14,	/* Can not make/remove an entry for the specified session */
-         CRED_UNAVAIL   = 15,	/* Underlying authentication service can not retrieve user credentials */
-         CRED_EXPIRED   = 16,	/* User credentials expired */
-         CRED_ERR   = 17,		/* Failure setting user credentials */
-         NO_MODULE_DATA     = 18,	/* No module specific data is present */
-         CONV_ERR   = 19,		/* Conversation error */
-         AUTHTOK_ERR    = 20,	/* Authentication token manipulation error */
-         AUTHTOK_RECOVERY_ERR   = 21, /* Authentication information cannot be recovered */
-         AUTHTOK_LOCK_BUSY  = 22,   /* Authentication token lock busy */
-         AUTHTOK_DISABLE_AGING  = 23, /* Authentication token aging disabled */
-         TRY_AGAIN  = 24,	/* Preliminary check by password service */
-         IGNORE     = 25,		/* Ignore underlying account module regardless of whether the control flag is required, optional, or sufficient */
-         ABORT  = 26,            /* Critical error (?module fail now request) */
-         AUTHTOK_EXPIRED    = 27, /* user's authentication token has expired */
-         MODULE_UNKNOWN     = 28, /* module is not known */
-         BAD_ITEM           = 29, /* Bad item passed to *_item() */
-         CONV_AGAIN         = 30, /* conversation function is event driven and data is not available yet */
-         INCOMPLETE         = 31, /* please call this function again to complete authentication stack. Before calling again, verify that conversation is completed */
-         UNKNOWN_RESULT     = -1, /* pam return a result we dont' understand */
-}*/
-
 #[repr(C)]
 pub struct PamMessage {
     pub msg_style: PamMsgStyle,
@@ -162,7 +124,7 @@ pub struct PamMessage {
 #[repr(C)]
 pub struct PamResponse {
     pub resp: *mut c_char,
-    pub resp_retcode: PamResult,
+    pub resp_retcode: PamError,
 }
 
 impl PamResponse {
@@ -231,12 +193,45 @@ pub enum PamItemType {
      AUTHTOK_TYPE       = 13,   /* The type for pam_get_authtok */
 }
 
-pub fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult {
-    unsafe { PamResult::new(pam_set_item(pamh, item_type as c_int, item)) }
+pub type PamResult<T> = Result<T, PamError>;
+
+impl PamError {
+    fn to_result<T>(self, ok: T) -> PamResult<T> {
+        if self == PamError::SUCCESS {
+            Ok(ok)
+        } else {
+            Err(self)
+        }
+    }
 }
 
-pub fn get_item(pamh: PamHandle, item_type: PamItemType, item: *mut *const c_void) -> PamResult {
-    unsafe { PamResult::new(pam_get_item(pamh, item_type as c_int, item)) }
+pub fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
+    PamError::new(unsafe { pam_set_item(pamh, item_type as c_int, item) }).to_result(())
+}
+
+pub fn get_item(pamh: PamHandle, item_type: PamItemType) -> PamResult<Option<*const c_void>> {
+    let mut raw_item : *const c_void = ptr::null();
+    let r = unsafe {
+        PamError::new(pam_get_item(pamh, item_type as c_int, &mut raw_item))
+    };
+    if raw_item.is_null() {
+        r.to_result(None)
+    } else {
+        r.to_result(Some(raw_item))
+    }
+}
+
+pub fn get_authtok(pamh: PamHandle, item_type: PamItemType,
+                   prompt: Option<*const c_char>) -> PamResult<Option<*const c_char>> {
+    let mut raw_at : *const c_char = ptr::null();
+    let r = unsafe {
+        PamError::new(pam_get_authtok(pamh, item_type as i32, &mut raw_at, prompt.unwrap_or(ptr::null())))
+    };
+    if raw_at.is_null() {
+        r.to_result(None)
+    } else {
+        r.to_result(Some(raw_at))
+    }
 }
 
 // Raw functions
@@ -259,6 +254,6 @@ extern "C" {
                         data: *mut *const c_void) -> c_int;
     pub fn pam_get_user(pamh: PamHandle, user: *mut *const c_char, prompt: *const c_char) -> c_int;
     pub fn pam_get_authtok(pamh: PamHandle, item: c_int, authok_ptr: *mut *const c_char,
-		 prompt: *const c_char);
+		 prompt: *const c_char) -> c_int;
 }
 
