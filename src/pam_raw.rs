@@ -2,6 +2,7 @@
 #![allow(non_camel_case_types)]
 
 use std::ptr;
+use std::fmt;
 use std::ptr::write_volatile;
 use std::option::Option;
 use libc::{c_char, c_int, c_uint, c_void, free, strlen};
@@ -18,45 +19,6 @@ pub enum PamMsgStyle {
     PAM_RADIO_TYPE  =5,       /* yes/no/maybe conditionals */
     PAM_BINARY_PROMPT   =7,
 }
-
-/*
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PamError {
-     SUCCESS    = 0,		/* Successful function return */
-     OPEN_ERR   = 1,		/* dlopen() failure when dynamically */
-     SYMBOL_ERR     = 2,	/* Symbol not found */
-     SERVICE_ERR    = 3,	/* Error in service module */
-     SYSTEM_ERR     = 4,	/* System error */
-     BUF_ERR    = 5,		/* Memory buffer error */
-     PERM_DENIED    = 6,	/* Permission denied */
-     AUTH_ERR   = 7,		/* Authentication failure */
-     CRED_INSUFFICIENT  = 8,	/* Can not access authentication data */
-     AUTHINFO_UNAVAIL   = 9,	/* Underlying authentication service can not retrieve authentication information  */
-     USER_UNKNOWN   = 10,	/* User not known to the underlying authenticaiton module */
-     MAXTRIES   = 11,		/* An authentication service has maintained a retry count which has been reached. No further retries should be attempted */
-     NEW_AUTHTOK_REQD   = 12,	/* New authentication token required. */
-     ACCT_EXPIRED   = 13,	/* User account has expired */
-     SESSION_ERR    = 14,	/* Can not make/remove an entry for the specified session */
-     CRED_UNAVAIL   = 15,	/* Underlying authentication service can not retrieve user credentials */
-     CRED_EXPIRED   = 16,	/* User credentials expired */
-     CRED_ERR   = 17,		/* Failure setting user credentials */
-     NO_MODULE_DATA     = 18,	/* No module specific data is present */
-     CONV_ERR   = 19,		/* Conversation error */
-     AUTHTOK_ERR    = 20,	/* Authentication token manipulation error */
-     AUTHTOK_RECOVERY_ERR   = 21, /* Authentication information cannot be recovered */
-     AUTHTOK_LOCK_BUSY  = 22,   /* Authentication token lock busy */
-     AUTHTOK_DISABLE_AGING  = 23, /* Authentication token aging disabled */
-     TRY_AGAIN  = 24,	/* Preliminary check by password service */
-     IGNORE     = 25,		/* Ignore underlying account module regardless of whether the control flag is required, optional, or sufficient */
-     ABORT  = 26,            /* Critical error (?module fail now request) */
-     AUTHTOK_EXPIRED    = 27, /* user's authentication token has expired */
-     MODULE_UNKNOWN     = 28, /* module is not known */
-     BAD_ITEM           = 29, /* Bad item passed to *_item() */
-     CONV_AGAIN         = 30, /* conversation function is event driven and data is not available yet */
-     INCOMPLETE         = 31, /* please call this function again to complete authentication stack. Before calling again, verify that conversation is completed */
-     UNKNOWN_RESULT     = -1, /* pam return a result we dont' understand */
-}
-*/
 
 macro_rules! i32_enum {
     ( $name:ident ($ukey:ident = $uvalue:expr) {
@@ -202,6 +164,12 @@ impl PamError {
         } else {
             Err(self)
         }
+    }
+}
+
+impl fmt::Display for PamError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
