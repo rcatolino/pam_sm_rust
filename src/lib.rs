@@ -32,5 +32,5 @@
 extern crate libc;
 
 mod pam;
-mod pam_raw;
+pub mod pam_raw;
 pub use self::pam::*;
