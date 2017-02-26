@@ -5,7 +5,8 @@ use std::ptr;
 use std::fmt;
 use std::ptr::write_volatile;
 use std::option::Option;
-use libc::{c_char, c_int, c_uint, c_void, free, strlen};
+use std::os::raw::{c_char, c_int, c_uint, c_void};
+use libc;
 
 pub type PamHandle = *const c_uint;
 
@@ -97,13 +98,13 @@ impl PamResponse {
     pub fn cleanup(&mut self) {
         unsafe {
             if ! self.resp.is_null() {
-                for _ in 0..strlen(self.resp) {
+                for _ in 0..libc::strlen(self.resp) {
                     write_volatile(self.resp, 0i8);
                 }
-                free(self.resp as *mut c_void);
+                libc::free(self.resp as *mut libc::c_void);
             }
             let asptr: *mut PamResponse = self;
-            free(asptr as *mut c_void);
+            libc::free(asptr as *mut libc::c_void);
         }
     }
 }

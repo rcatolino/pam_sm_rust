@@ -1,8 +1,8 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
 use libc::{size_t};
-use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_item, get_authtok};
-use std::os::raw::c_char;
+use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_item, get_authtok, set_item};
+use std::os::raw::{c_char, c_void};
 use std::ffi::{CStr, CString};
 use std::str::Utf8Error;
 
@@ -11,7 +11,7 @@ pub struct Pam(PamHandle);
 
 impl Pam {
     /// Get the cached authentication token.
-    pub fn get_cached_authtok<'a>(&self) -> PamResult<Option<&'a CStr>> {
+    pub fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
         // pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
         unsafe {
@@ -21,7 +21,7 @@ impl Pam {
     }
 
     /// Get the cached authentication token or prompt the user for one if there isn't any
-    pub fn get_authtok<'a>(&self, prompt: Option<&str>) -> PamResult<Option<&'a CStr>> {
+    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let result = try!(get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr())));
         // If result is Ok we're guaranteed that p is a valid pointer
@@ -29,6 +29,11 @@ impl Pam {
             Ok(result.map(|p| CStr::from_ptr(p)))
         }
     }
+
+    pub fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
+        set_item(self.0, PamItemType::AUTHTOK, authtok.as_ptr() as *const c_void)
+    }
+
 }
 
 /// Default service module implementation.
