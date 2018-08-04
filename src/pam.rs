@@ -1,7 +1,7 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
 use libc::{size_t};
-use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_item, get_authtok, set_item};
+use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_user, get_item, get_authtok, set_item};
 use std::os::raw::{c_char, c_void};
 use std::ffi::{CStr, CString};
 use std::str::Utf8Error;
@@ -10,30 +10,64 @@ use std::str::Utf8Error;
 pub struct Pam(PamHandle);
 
 impl Pam {
+
+    /// Get the username. If the PAM_USER item is not set, this function
+    /// prompts for a username (like get_authtok).
+    pub fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&str>> {
+        let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
+        let pointer = get_user(self.0, cprompt.as_ref().map(|p| p.as_ptr()))?;
+        ptr_to_str(pointer)
+    }
+
+    /// Get the username, i.e. the PAM_USER item. If it's not set return None.
+    pub fn get_cached_user(&self) -> PamResult<Option<&str>> {
+        let pointer = get_item(self.0, PamItemType::AUTHTOK)?;
+        ptr_to_str(pointer)
+    }
+
     /// Get the cached authentication token.
-    pub fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
-        // pam should keep the underlying token allocated for as long as the module is loaded
-        // which make this safe
+    pub fn get_cached_authtok(&self) -> PamResult<Option<&[u8]>> {
         unsafe {
             let pointer = try!(get_item(self.0, PamItemType::AUTHTOK));
-            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
+            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char).to_bytes()))
         }
     }
 
     /// Get the cached authentication token or prompt the user for one if there isn't any
-    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
+    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&[u8]>> {
         let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let result = try!(get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr())));
         // If result is Ok we're guaranteed that p is a valid pointer
         unsafe {
-            Ok(result.map(|p| CStr::from_ptr(p)))
+            Ok(result.map(|p| CStr::from_ptr(p).to_bytes()))
         }
     }
 
-    pub fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
+    pub fn set_authtok(&self, authtok: &[u8]) -> PamResult<()> {
         set_item(self.0, PamItemType::AUTHTOK, authtok.as_ptr() as *const c_void)
     }
 
+    /// Get the remote hostname.
+    pub fn get_rhost<'a>(&'a self) -> PamResult<Option<&'a str>> {
+        let pointer = get_item(self.0, PamItemType::RHOST)?;
+        ptr_to_str(pointer)
+    }
+
+    /// Get the remote username.
+    pub fn get_ruser<'a>(&'a self) -> PamResult<Option<&'a str>> {
+        let pointer = get_item(self.0, PamItemType::RUSER)?;
+        ptr_to_str(pointer)
+    }
+}
+
+fn ptr_to_str(pointer: Option<*const c_void>) -> PamResult<Option<&'static str>> {
+    match unsafe { pointer.map(|p| CStr::from_ptr(p as *const c_char)) } {
+        None => Ok(None),
+        Some(cstr) => {
+            let s = ::std::str::from_utf8(cstr.to_bytes()).map_err(|_| PamError::AUTHINFO_UNAVAIL)?;
+            Ok(Some(s))
+        },
+    }
 }
 
 /// Default service module implementation.
@@ -66,19 +100,8 @@ pub trait PamServiceModule {
     }
 }
 
-/// You must implement a get_pam_sm function that returns a Box<PamServiceModule>
-/// This PamServiceModule implementation should override the functions you need in your module
-#[allow(improper_ctypes)]
-extern {
-    #[no_mangle]
-    fn get_pam_sm() -> Box<PamServiceModule>;
-}
-
-thread_local! {
-    static PAMSM: Box<PamServiceModule> = unsafe { get_pam_sm() };
-}
-
-unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<String>, Utf8Error> {
+#[doc(hidden)]
+pub unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<String>, Utf8Error> {
     let mut args = Vec::<String>::with_capacity(argc);
     for count in 0..(argc as isize) {
         args.push(try!(CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()).to_owned())
@@ -86,25 +109,47 @@ unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<Strin
     Ok(args)
 }
 
+#[macro_export]
 macro_rules! pam_callback {
     ($pam_cb:ident, $rust_cb:ident) => {
         #[no_mangle]
         #[doc(hidden)]
-        pub extern "C" fn $pam_cb(pamh: Pam, flags: PamFlag,
-                                   argc: size_t, argv: *const *const u8) -> PamError {
-            match unsafe { extract_args(argc, argv) } {
+        pub extern "C" fn $pam_cb(pamh: pamsm::Pam, flags: pamsm::pam_raw::PamFlag,
+                                   argc: usize, argv: *const *const u8) -> pamsm::pam_raw::PamError {
+            match unsafe { pamsm::extract_args(argc, argv) } {
                 Ok(args) => PAMSM.with(|sm| sm.$rust_cb(pamh, flags, args)),
-                Err(_) => PamError::SERVICE_ERR,
+                Err(_) => pamsm::pam_raw::PamError::SERVICE_ERR,
             }
         }
     }
 }
 
-// Pam Callbacks
-pam_callback!(pam_sm_open_session, open_session);
-pam_callback!(pam_sm_close_session, close_session);
-pam_callback!(pam_sm_authenticate, authenticate);
-pam_callback!(pam_sm_setcred, setcred);
-pam_callback!(pam_sm_acct_mgmt, acct_mgmt);
-pam_callback!(pam_sm_chauthtok, chauthtok);
+/// Initialize the PAM module.
+///
+/// This macro must be called from the main library's entry point,
+/// usually src/lib.rs. It then exports all the pam_sm_* symbols.
+///
+/// The argument to the macro is an expression that generates a
+/// new PamServiceModule trait-object, for example
+///
+/// ```ignore
+/// // lib.rs
+/// #[macro_use] extern crate pamsm;
+///
+/// pamsm_init!(Box::new(MyStruct::new()));
+/// ```
+#[macro_export]
+macro_rules! pamsm_init {
+    ($get_pam_sm:expr) => {
+        thread_local! {
+            static PAMSM: Box<pamsm::PamServiceModule> = $get_pam_sm;
+        }
+        pam_callback!(pam_sm_open_session, open_session);
+        pam_callback!(pam_sm_close_session, close_session);
+        pam_callback!(pam_sm_authenticate, authenticate);
+        pam_callback!(pam_sm_setcred, setcred);
+        pam_callback!(pam_sm_acct_mgmt, acct_mgmt);
+        pam_callback!(pam_sm_chauthtok, chauthtok);
+    }
+}
 
