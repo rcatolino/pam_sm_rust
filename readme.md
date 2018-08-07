@@ -5,7 +5,7 @@
 
 Rust FFI wrapper to implement PAM service modules for Linux.
 
-**[Documentation](https://docs.rs/json/) -**
-**[Cargo](https://crates.io/crates/json) -**
+**[Documentation](https://docs.rs/pamsm/) -**
+**[Cargo](https://crates.io/crates/pamsm) -**
 **[Repository](https://github.com/rcatolino/pam_sm_rust)**
 
