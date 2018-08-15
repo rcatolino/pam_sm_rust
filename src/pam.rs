@@ -13,60 +13,60 @@ impl Pam {
 
     /// Get the username. If the PAM_USER item is not set, this function
     /// prompts for a username (like get_authtok).
-    pub fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&str>> {
+    pub fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let pointer = get_user(self.0, cprompt.as_ref().map(|p| p.as_ptr()))?;
-        ptr_to_str(pointer)
+        unsafe {
+            Ok(pointer.map(|p| CStr::from_ptr(p)))
+        }
     }
 
     /// Get the username, i.e. the PAM_USER item. If it's not set return None.
-    pub fn get_cached_user(&self) -> PamResult<Option<&str>> {
-        let pointer = get_item(self.0, PamItemType::AUTHTOK)?;
-        ptr_to_str(pointer)
+    pub fn get_cached_user(&self) -> PamResult<Option<&CStr>> {
+        let pointer = get_item(self.0, PamItemType::USER)?;
+        unsafe {
+            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
+        }
     }
 
     /// Get the cached authentication token.
-    pub fn get_cached_authtok(&self) -> PamResult<Option<&[u8]>> {
+    pub fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
+        // pam should keep the underlying token allocated for as long as the module is loaded
+        // which make this safe
         unsafe {
             let pointer = try!(get_item(self.0, PamItemType::AUTHTOK));
-            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char).to_bytes()))
+            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
 
     /// Get the cached authentication token or prompt the user for one if there isn't any
-    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&[u8]>> {
+    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let result = try!(get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr())));
         // If result is Ok we're guaranteed that p is a valid pointer
         unsafe {
-            Ok(result.map(|p| CStr::from_ptr(p).to_bytes()))
+            Ok(result.map(|p| CStr::from_ptr(p)))
         }
     }
 
-    pub fn set_authtok(&self, authtok: &[u8]) -> PamResult<()> {
+    pub fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
         set_item(self.0, PamItemType::AUTHTOK, authtok.as_ptr() as *const c_void)
     }
 
     /// Get the remote hostname.
-    pub fn get_rhost<'a>(&'a self) -> PamResult<Option<&'a str>> {
+    pub fn get_rhost(&self) -> PamResult<Option<&CStr>> {
         let pointer = get_item(self.0, PamItemType::RHOST)?;
-        ptr_to_str(pointer)
+        unsafe {
+            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
+        }
     }
 
     /// Get the remote username.
-    pub fn get_ruser<'a>(&'a self) -> PamResult<Option<&'a str>> {
+    pub fn get_ruser(&self) -> PamResult<Option<& CStr>> {
         let pointer = get_item(self.0, PamItemType::RUSER)?;
-        ptr_to_str(pointer)
-    }
-}
-
-fn ptr_to_str(pointer: Option<*const c_void>) -> PamResult<Option<&'static str>> {
-    match unsafe { pointer.map(|p| CStr::from_ptr(p as *const c_char)) } {
-        None => Ok(None),
-        Some(cstr) => {
-            let s = ::std::str::from_utf8(cstr.to_bytes()).map_err(|_| PamError::AUTHINFO_UNAVAIL)?;
-            Ok(Some(s))
-        },
+        unsafe {
+            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
+        }
     }
 }
 
@@ -109,6 +109,7 @@ pub unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<S
     Ok(args)
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! pam_callback {
     ($pam_cb:ident, $rust_cb:ident) => {

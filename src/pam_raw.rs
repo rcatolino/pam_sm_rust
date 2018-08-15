@@ -31,7 +31,7 @@ macro_rules! i32_enum {
             $ukey = $uvalue,
         }
         impl $name {
-            pub fn new(r: i32) -> $name {
+            fn new(r: i32) -> $name {
                 match r {
                     $( $value => $name::$key, )*
                     _ => $name::$ukey,
@@ -174,7 +174,7 @@ impl fmt::Display for PamError {
     }
 }
 
-pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Option<*const c_void>> {
+pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Option<*const c_char>> {
     let mut raw_user : *const c_char = ptr::null();
     let r = unsafe {
         PamError::new(pam_get_user(pamh, &mut raw_user, prompt.unwrap_or(ptr::null())))
@@ -182,7 +182,7 @@ pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Opt
     if raw_user.is_null() {
         r.to_result(None)
     } else {
-        r.to_result(Some(raw_user as *const c_void))
+        r.to_result(Some(raw_user))
     }
 }
 
