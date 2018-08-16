@@ -34,7 +34,7 @@ impl Pam {
         // pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
         unsafe {
-            let pointer = try!(get_item(self.0, PamItemType::AUTHTOK));
+            let pointer = get_item(self.0, PamItemType::AUTHTOK)?;
             Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
         }
     }
@@ -42,7 +42,7 @@ impl Pam {
     /// Get the cached authentication token or prompt the user for one if there isn't any
     pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
-        let result = try!(get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr())));
+        let result = get_authtok(self.0, PamItemType::AUTHTOK, cprompt.as_ref().map(|p| p.as_ptr()))?;
         // If result is Ok we're guaranteed that p is a valid pointer
         unsafe {
             Ok(result.map(|p| CStr::from_ptr(p)))
@@ -104,7 +104,7 @@ pub trait PamServiceModule {
 pub unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<String>, Utf8Error> {
     let mut args = Vec::<String>::with_capacity(argc);
     for count in 0..(argc as isize) {
-        args.push(try!(CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()).to_owned())
+        args.push(CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()?.to_owned())
     }
     Ok(args)
 }
