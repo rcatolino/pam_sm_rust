@@ -4,11 +4,11 @@
 //! For example, here is a time based authentication module :
 //!
 //! ```
+//! #[macro_use]
 //! extern crate pamsm;
 //! extern crate time;
 //!
-//! use pamsm::{PamServiceModule, Pam};
-//! use pamsm::pam_raw::{PamFlag, PamError};
+//! use pamsm::{PamServiceModule, Pam, PamFlag, PamError};
 //!
 //! struct PamTime;
 //!
@@ -24,13 +24,7 @@
 //!     }
 //! }
 //!
-//! #[no_mangle]
-//! pub extern "C" fn get_pam_sm() -> Box<PamServiceModule> {
-//!     return Box::new(PamTime {});
-//! }
-//!
-//! pub fn main() {
-//! }
+//! pamsm_init!(Box::new(PamTime));
 //! ```
 
 extern crate libc;
@@ -38,3 +32,5 @@ extern crate libc;
 mod pam;
 pub mod pam_raw;
 pub use self::pam::*;
+pub use self::pam_raw::{PamFlag,PamError};
+

@@ -174,6 +174,18 @@ impl fmt::Display for PamError {
     }
 }
 
+pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Option<*const c_char>> {
+    let mut raw_user : *const c_char = ptr::null();
+    let r = unsafe {
+        PamError::new(pam_get_user(pamh, &mut raw_user, prompt.unwrap_or(ptr::null())))
+    };
+    if raw_user.is_null() {
+        r.to_result(None)
+    } else {
+        r.to_result(Some(raw_user))
+    }
+}
+
 pub fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
     PamError::new(unsafe { pam_set_item(pamh, item_type as c_int, item) }).to_result(())
 }

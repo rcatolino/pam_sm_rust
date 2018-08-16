@@ -4,9 +4,8 @@ version = "0.1.0"
 authors = ["rca <raphael.catolino@gmail.com>"]
 
 [dependencies]
-libc = "^0.2"
 time = "^0.1"
 pamsm = { path = "../" }
 
 [lib]
-crate-type = ["dylib"]
+crate-type = ["cdylib"]
