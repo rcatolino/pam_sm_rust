@@ -75,27 +75,27 @@ impl Pam {
 /// You can override functions depending on what kind of module you implement.
 /// See the respective pam_sm_* man pages for documentation.
 pub trait PamServiceModule {
-    fn open_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn open_session(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn close_session(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn close_session(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn authenticate(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn authenticate(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn setcred(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn setcred(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn acct_mgmt(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn acct_mgmt(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn chauthtok(self: &Self, _: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn chauthtok(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 }
@@ -109,48 +109,49 @@ pub unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<S
     Ok(args)
 }
 
-#[doc(hidden)]
 #[macro_export]
 macro_rules! pam_callback {
-    ($pam_cb:ident, $rust_cb:ident) => {
+    ($pamsm_ty:ty, $pam_cb:ident, $rust_cb:ident) => {
         #[no_mangle]
         #[doc(hidden)]
         pub extern "C" fn $pam_cb(pamh: pamsm::Pam, flags: pamsm::pam_raw::PamFlag,
-                                   argc: usize, argv: *const *const u8) -> pamsm::pam_raw::PamError {
+                                  argc: usize, argv: *const *const u8) -> pamsm::pam_raw::PamError {
             match unsafe { pamsm::extract_args(argc, argv) } {
-                Ok(args) => PAMSM.with(|sm| sm.$rust_cb(pamh, flags, args)),
+                Ok(args) => <$pamsm_ty>::$rust_cb(pamh, flags, args),
                 Err(_) => pamsm::pam_raw::PamError::SERVICE_ERR,
             }
         }
     }
 }
 
-/// Initialize the PAM module.
+/// Define entrypoints for the PAM module.
 ///
-/// This macro must be called from the main library's entry point,
-/// usually src/lib.rs. It then exports all the pam_sm_* symbols.
+/// This macro must be called exactly once in a PAM module.
+/// It then exports all the pam_sm_* symbols.
 ///
-/// The argument to the macro is an expression that generates a
-/// new PamServiceModule trait-object, for example
+/// The argument to the macro is a type implementing the
+/// `PamServiceModule` trait.
+///
+/// # Example
 ///
 /// ```ignore
 /// // lib.rs
 /// #[macro_use] extern crate pamsm;
 ///
-/// pamsm_init!(Box::new(MyStruct::new()));
+/// pam_module!(MyPamService);
 /// ```
 #[macro_export]
-macro_rules! pamsm_init {
-    ($get_pam_sm:expr) => {
-        thread_local! {
-            static PAMSM: Box<pamsm::PamServiceModule> = $get_pam_sm;
-        }
-        pam_callback!(pam_sm_open_session, open_session);
-        pam_callback!(pam_sm_close_session, close_session);
-        pam_callback!(pam_sm_authenticate, authenticate);
-        pam_callback!(pam_sm_setcred, setcred);
-        pam_callback!(pam_sm_acct_mgmt, acct_mgmt);
-        pam_callback!(pam_sm_chauthtok, chauthtok);
+macro_rules! pam_module {
+    ($pamsm_ty:ty) => {
+        // Check trait bound on input type.
+        fn _check_pamsm_trait<T: pamsm::PamServiceModule>() { }
+        fn _t() { _check_pamsm_trait::<$pamsm_ty>() }
+
+        pam_callback!($pamsm_ty, pam_sm_open_session, open_session);
+        pam_callback!($pamsm_ty, pam_sm_close_session, close_session);
+        pam_callback!($pamsm_ty, pam_sm_authenticate, authenticate);
+        pam_callback!($pamsm_ty, pam_sm_setcred, setcred);
+        pam_callback!($pamsm_ty, pam_sm_acct_mgmt, acct_mgmt);
+        pam_callback!($pamsm_ty, pam_sm_chauthtok, chauthtok);
     }
 }
-

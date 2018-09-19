@@ -3,9 +3,8 @@
 //! # Usage
 //! For example, here is a time based authentication module :
 //!
-//! ```
-//! #[macro_use]
-//! extern crate pamsm;
+//! ```rust
+//! #[macro_use] extern crate pamsm;
 //! extern crate time;
 //!
 //! use pamsm::{PamServiceModule, Pam, PamFlag, PamError};
@@ -13,7 +12,7 @@
 //! struct PamTime;
 //!
 //! impl PamServiceModule for PamTime {
-//!     fn authenticate(self: &Self, pamh: Pam, _: PamFlag, args: Vec<String>) -> PamError {
+//!     fn authenticate(pamh: Pam, _: PamFlag, args: Vec<String>) -> PamError {
 //!         let hour = time::now().tm_hour;
 //!         if hour != 4 {
 //!             // Only allow authentication when it's 4 AM
@@ -24,7 +23,7 @@
 //!     }
 //! }
 //!
-//! pamsm_init!(Box::new(PamTime));
+//! pam_module!(PamTime);
 //! ```
 
 extern crate libc;
