@@ -3,7 +3,7 @@
 //! # Usage
 //! For example, here is a time based authentication module :
 //!
-//! ```rust
+//! ```rust,no_run
 //! #[macro_use] extern crate pamsm;
 //! extern crate time;
 //!
