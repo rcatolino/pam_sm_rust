@@ -1,10 +1,8 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
-use libc::{size_t};
 use pam_raw::{PamFlag, PamHandle, PamItemType, PamError, PamResult, get_user, get_item, get_authtok, set_item};
-use std::os::raw::{c_char, c_void};
 use std::ffi::{CStr, CString};
-use std::str::Utf8Error;
+use std::os::raw::{c_char, c_void};
 
 /// Opaque PAM handle
 pub struct Pam(PamHandle);
@@ -100,30 +98,6 @@ pub trait PamServiceModule {
     }
 }
 
-#[doc(hidden)]
-pub unsafe fn extract_args(argc: size_t, argv: *const *const u8) -> Result<Vec<String>, Utf8Error> {
-    let mut args = Vec::<String>::with_capacity(argc);
-    for count in 0..(argc as isize) {
-        args.push(CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()?.to_owned())
-    }
-    Ok(args)
-}
-
-#[macro_export]
-macro_rules! pam_callback {
-    ($pamsm_ty:ty, $pam_cb:ident, $rust_cb:ident) => {
-        #[no_mangle]
-        #[doc(hidden)]
-        pub extern "C" fn $pam_cb(pamh: pamsm::Pam, flags: pamsm::pam_raw::PamFlag,
-                                  argc: usize, argv: *const *const u8) -> pamsm::pam_raw::PamError {
-            match unsafe { pamsm::extract_args(argc, argv) } {
-                Ok(args) => <$pamsm_ty>::$rust_cb(pamh, flags, args),
-                Err(_) => pamsm::pam_raw::PamError::SERVICE_ERR,
-            }
-        }
-    }
-}
-
 /// Define entrypoints for the PAM module.
 ///
 /// This macro must be called exactly once in a PAM module.
@@ -147,11 +121,33 @@ macro_rules! pam_module {
         fn _check_pamsm_trait<T: pamsm::PamServiceModule>() { }
         fn _t() { _check_pamsm_trait::<$pamsm_ty>() }
 
-        pam_callback!($pamsm_ty, pam_sm_open_session, open_session);
-        pam_callback!($pamsm_ty, pam_sm_close_session, close_session);
-        pam_callback!($pamsm_ty, pam_sm_authenticate, authenticate);
-        pam_callback!($pamsm_ty, pam_sm_setcred, setcred);
-        pam_callback!($pamsm_ty, pam_sm_acct_mgmt, acct_mgmt);
-        pam_callback!($pamsm_ty, pam_sm_chauthtok, chauthtok);
+        // Callback entry definition.
+        macro_rules! pam_callback {
+            ($pam_cb:ident, $rust_cb:ident) => {
+                #[no_mangle]
+                #[doc(hidden)]
+                pub extern "C" fn $pam_cb(pamh: pamsm::Pam, flags: pamsm::pam_raw::PamFlag,
+                                          argc: usize, argv: *const *const u8) -> pamsm::pam_raw::PamError {
+                    use std::os::raw::c_char;
+                    use std::ffi::CStr;
+
+                    let mut args = Vec::<String>::with_capacity(argc);
+                    for count in 0..(argc as isize) {
+                        match unsafe { CStr::from_ptr(*argv.offset(count) as *const c_char).to_str() } {
+                            Ok(s) => args.push(s.to_owned()),
+                            Err(_) => return pamsm::pam_raw::PamError::SERVICE_ERR,
+                        };
+                    }
+                    <$pamsm_ty>::$rust_cb(pamh, flags, args)
+                }
+            }
+        }
+
+        pam_callback!(pam_sm_open_session, open_session);
+        pam_callback!(pam_sm_close_session, close_session);
+        pam_callback!(pam_sm_authenticate, authenticate);
+        pam_callback!(pam_sm_setcred, setcred);
+        pam_callback!(pam_sm_acct_mgmt, acct_mgmt);
+        pam_callback!(pam_sm_chauthtok, chauthtok);
     }
 }
