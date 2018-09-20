@@ -1,4 +1,5 @@
 // Copyright (C) 2016 Raphael Catolino
+
 //! PAM Service Module wrappers
 //! # Usage
 //! For example, here is a time based authentication module :
@@ -29,7 +30,7 @@
 extern crate libc;
 
 mod pam;
-pub mod pam_raw;
-pub use self::pam::*;
-pub use self::pam_raw::{PamFlag,PamError};
+mod pam_types;
+mod libpam;
 
+pub use pam::{PamServiceModule, Pam, PamFlag, PamError};

@@ -7,7 +7,7 @@ use pamsm::{PamServiceModule, Pam, PamFlag, PamError};
 struct PamTime;
 
 impl PamServiceModule for PamTime {
-    fn authenticate(_pamh: Pam, _: PamFlag, args: Vec<String>) -> PamError {
+    fn authenticate(_pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
 
         // If you need login/password here, that works like this:
         //
