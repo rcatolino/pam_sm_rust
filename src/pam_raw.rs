@@ -112,6 +112,7 @@ impl PamResponse {
 
 #[repr(C)]
 pub struct PamConv {
+    #[cfg_attr(feature = "cargo-clippy", allow(type_complexity))]
     pub cb: Option<extern "C" fn (arg1: c_int, arg2: *mut *const PamMessage,
                                   arg3: *mut *mut PamResponse, arg4: *mut c_void)
                                   -> c_int>,
@@ -186,6 +187,7 @@ pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Opt
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(not_unsafe_ptr_arg_deref))]
 pub fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
     PamError::new(unsafe { pam_set_item(pamh, item_type as c_int, item) }).to_result(())
 }
