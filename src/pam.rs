@@ -2,33 +2,65 @@
 
 #![allow(non_camel_case_types)]
 
-use libpam::{get_authtok, get_item, get_user, set_item};
-use pam_types::{PamHandle, PamItemType};
+use pam_types::PamHandle;
 use std::ffi::{CStr, CString};
 use std::fmt;
+
+#[cfg(feature = "libpam")]
+use libpam::{get_authtok, get_item, get_user, set_item};
+#[cfg(feature = "libpam")]
+use pam_types::PamItemType;
+#[cfg(feature = "libpam")]
 use std::os::raw::{c_char, c_void};
 
-/// Opaque PAM handle
+/// This contains a private marker trait, used to seal private traits.
+mod private {
+    pub trait Sealed {}
+    impl Sealed for super::Pam {}
+}
+
+/// Opaque PAM handle, with additional native methods available via `PamLibExt`.
 pub struct Pam(PamHandle);
 
-impl Pam {
+/// Extension trait over `Pam`, usually provided by the `libpam` shared library.
+pub trait PamLibExt: private::Sealed {
     /// Get the username. If the PAM_USER item is not set, this function
     /// prompts for a username (like get_authtok).
-    pub fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
+    fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
+
+    /// Get the username, i.e. the PAM_USER item. If it's not set return None.
+    fn get_cached_user(&self) -> PamResult<Option<&CStr>>;
+
+    /// Get the cached authentication token.
+    fn get_cached_authtok(&self) -> PamResult<Option<&CStr>>;
+
+    /// Get the cached authentication token or prompt the user for one if there isn't any.
+    fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
+
+    fn set_authtok(&self, authtok: &CString) -> PamResult<()>;
+
+    /// Get the remote hostname.
+    fn get_rhost(&self) -> PamResult<Option<&CStr>>;
+
+    /// Get the remote username.
+    fn get_ruser(&self) -> PamResult<Option<&CStr>>;
+}
+
+#[cfg(feature = "libpam")]
+impl PamLibExt for Pam {
+    fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt
             .map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let pointer = get_user(self.0, cprompt.as_ref().map(|p| p.as_ptr()))?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p))) }
     }
 
-    /// Get the username, i.e. the PAM_USER item. If it's not set return None.
-    pub fn get_cached_user(&self) -> PamResult<Option<&CStr>> {
+    fn get_cached_user(&self) -> PamResult<Option<&CStr>> {
         let pointer = get_item(self.0, PamItemType::USER)?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
     }
 
-    /// Get the cached authentication token.
-    pub fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
+    fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
         // pam should keep the underlying token allocated for as long as the module is loaded
         // which make this safe
         unsafe {
@@ -37,8 +69,7 @@ impl Pam {
         }
     }
 
-    /// Get the cached authentication token or prompt the user for one if there isn't any
-    pub fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
+    fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt
             .map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
         let result = get_authtok(
@@ -50,7 +81,7 @@ impl Pam {
         unsafe { Ok(result.map(|p| CStr::from_ptr(p))) }
     }
 
-    pub fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
+    fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
         set_item(
             self.0,
             PamItemType::AUTHTOK,
@@ -58,14 +89,12 @@ impl Pam {
         )
     }
 
-    /// Get the remote hostname.
-    pub fn get_rhost(&self) -> PamResult<Option<&CStr>> {
+    fn get_rhost(&self) -> PamResult<Option<&CStr>> {
         let pointer = get_item(self.0, PamItemType::RHOST)?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
     }
 
-    /// Get the remote username.
-    pub fn get_ruser(&self) -> PamResult<Option<&CStr>> {
+    fn get_ruser(&self) -> PamResult<Option<&CStr>> {
         let pointer = get_item(self.0, PamItemType::RUSER)?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
     }
@@ -74,6 +103,7 @@ impl Pam {
 pub type PamResult<T> = Result<T, PamError>;
 
 impl PamError {
+    #[cfg(feature = "libpam")]
     pub(crate) fn to_result<T>(self, ok: T) -> PamResult<T> {
         if self == PamError::SUCCESS {
             Ok(ok)
@@ -109,6 +139,7 @@ macro_rules! i32_enum {
             $ukey = $uvalue,
         }
         impl $name {
+            #[cfg(feature = "libpam")]
             pub(crate) fn new(r: i32) -> $name {
                 match r {
                     $( $value => $name::$key, )*

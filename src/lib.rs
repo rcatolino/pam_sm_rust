@@ -31,6 +31,10 @@ extern crate libc;
 
 mod pam;
 mod pam_types;
+#[cfg(feature = "libpam")]
 mod libpam;
 
-pub use pam::{PamServiceModule, Pam, PamFlag, PamError};
+pub use pam::{PamServiceModule, Pam, PamFlag, PamError, PamResult};
+
+#[cfg(feature = "libpam")]
+pub use pam::PamLibExt;
