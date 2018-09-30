@@ -10,4 +10,6 @@ categories = ["os::unix-apis", "authentication", "api-bindings"]
 
 [dependencies]
 libc = "^0.2.19"
+
+[dev-dependencies]
 time = "^0.1.37"
