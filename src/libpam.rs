@@ -20,9 +20,8 @@ pub fn get_user(pamh: PamHandle, prompt: Option<*const c_char>) -> PamResult<Opt
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(not_unsafe_ptr_arg_deref))]
-pub fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
-    PamError::new(unsafe { pam_set_item(pamh, item_type as c_int, item) }).to_result(())
+pub(crate) unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
+    PamError::new(pam_set_item(pamh, item_type as c_int, item)).to_result(())
 }
 
 pub fn get_item(pamh: PamHandle, item_type: PamItemType) -> PamResult<Option<*const c_void>> {
