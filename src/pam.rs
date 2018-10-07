@@ -82,11 +82,11 @@ impl PamLibExt for Pam {
     }
 
     fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
-        set_item(
+        unsafe { set_item(
             self.0,
             PamItemType::AUTHTOK,
             authtok.as_ptr() as *const c_void,
-        )
+        ) }
     }
 
     fn get_rhost(&self) -> PamResult<Option<&CStr>> {

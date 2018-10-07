@@ -51,18 +51,17 @@ impl PamResponse {
     }
 }
 
+pub(crate) type PamConvCallback = extern "C" fn(
+    arg1: c_int,
+    arg2: *mut *const PamMessage,
+    arg3: *mut *mut PamResponse,
+    arg4: *mut c_void,
+) -> c_int;
+
 #[repr(C)]
-pub struct PamConv {
-    #[cfg_attr(feature = "cargo-clippy", allow(type_complexity))]
-    pub cb: Option<
-        extern "C" fn(
-            arg1: c_int,
-            arg2: *mut *const PamMessage,
-            arg3: *mut *mut PamResponse,
-            arg4: *mut c_void,
-        ) -> c_int,
-    >,
-    pub appdata_ptr: *mut c_void,
+pub(crate) struct PamConv {
+    pub(crate) cb: Option<PamConvCallback>,
+    pub(crate) appdata_ptr: *mut c_void,
 }
 
 #[repr(C)]
