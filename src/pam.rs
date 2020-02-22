@@ -258,7 +258,7 @@ macro_rules! pam_module {
 
                     let mut args = Vec::<String>::with_capacity(argc);
                     for count in 0..(argc as isize) {
-                        match unsafe {
+                        match {
                             CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()
                         } {
                             Ok(s) => args.push(s.to_owned()),
