@@ -247,7 +247,7 @@ macro_rules! pam_module {
             ($pam_cb:ident, $rust_cb:ident) => {
                 #[no_mangle]
                 #[doc(hidden)]
-                pub extern "C" fn $pam_cb(
+                pub unsafe extern "C" fn $pam_cb(
                     pamh: pamsm::Pam,
                     flags: pamsm::PamFlag,
                     argc: usize,
