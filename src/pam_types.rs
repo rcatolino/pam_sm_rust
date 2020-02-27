@@ -1,11 +1,9 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use libc;
 use pam::PamError;
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
-use std::ptr::write_volatile;
 
 pub type PamHandle = *const c_uint;
 
@@ -29,34 +27,15 @@ pub struct PamMessage {
 
 #[repr(C)]
 pub struct PamResponse {
-    pub resp: *mut c_char,
+    pub resp: Option<*mut c_char>,
     pub resp_retcode: PamError,
 }
 
-impl PamResponse {
-    pub fn get_buff(&self) -> *const c_char {
-        self.resp as *const c_char
-    }
-
-    pub fn cleanup(&mut self) {
-        unsafe {
-            if !self.resp.is_null() {
-                for _ in 0..libc::strlen(self.resp) {
-                    write_volatile(self.resp, 0i8);
-                }
-                libc::free(self.resp as *mut libc::c_void);
-            }
-            let asptr: *mut PamResponse = self;
-            libc::free(asptr as *mut libc::c_void);
-        }
-    }
-}
-
 pub(crate) type PamConvCallback = extern "C" fn(
-    arg1: c_int,
-    arg2: *mut *const PamMessage,
-    arg3: *mut *mut PamResponse,
-    arg4: *mut c_void,
+    num_msg: c_int,
+    msg: *mut *const PamMessage,
+    resp: *mut *mut PamResponse,
+    appdata_ptr: *mut c_void,
 ) -> c_int;
 
 #[repr(C)]
