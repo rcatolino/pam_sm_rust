@@ -9,6 +9,7 @@ use std::ptr::write_volatile;
 
 pub type PamHandle = *const c_uint;
 
+#[repr(C)]
 pub enum PamMsgStyle {
     PROMPT_ECHO_OFF = 1, /* Ask for password without echo */
     PROMPT_ECHO_ON = 2,  /* Ask for password with echo */
@@ -23,7 +24,7 @@ pub enum PamMsgStyle {
 #[repr(C)]
 pub struct PamMessage {
     pub msg_style: PamMsgStyle,
-    pub msg: *const u8,
+    pub msg: *const c_char,
 }
 
 #[repr(C)]
