@@ -82,11 +82,13 @@ impl PamLibExt for Pam {
     }
 
     fn set_authtok(&self, authtok: &CString) -> PamResult<()> {
-        unsafe { set_item(
-            self.0,
-            PamItemType::AUTHTOK,
-            authtok.as_ptr() as *const c_void,
-        ) }
+        unsafe {
+            set_item(
+                self.0,
+                PamItemType::AUTHTOK,
+                authtok.as_ptr() as *const c_void,
+            )
+        }
     }
 
     fn get_rhost(&self) -> PamResult<Option<&CStr>> {
@@ -258,9 +260,7 @@ macro_rules! pam_module {
 
                     let mut args = Vec::<String>::with_capacity(argc);
                     for count in 0..(argc as isize) {
-                        match {
-                            CStr::from_ptr(*argv.offset(count) as *const c_char).to_str()
-                        } {
+                        match { CStr::from_ptr(*argv.offset(count) as *const c_char).to_str() } {
                             Ok(s) => args.push(s.to_owned()),
                             Err(_) => return pamsm::PamError::SERVICE_ERR,
                         };
