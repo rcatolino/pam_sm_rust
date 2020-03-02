@@ -9,9 +9,11 @@ use std::fmt;
 #[cfg(feature = "libpam")]
 use libpam::{get_authtok, get_item, get_user, set_item};
 #[cfg(feature = "libpam")]
-use pam_types::PamItemType;
+use pam_types::{PamConv, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 #[cfg(feature = "libpam")]
 use std::os::raw::{c_char, c_void};
+#[cfg(feature = "libpam")]
+use std::ptr;
 
 /// This contains a private marker trait, used to seal private traits.
 mod private {
@@ -44,13 +46,19 @@ pub trait PamLibExt: private::Sealed {
 
     /// Get the remote username.
     fn get_ruser(&self) -> PamResult<Option<&CStr>>;
+
+    #[cfg(feature = "libpam")]
+    /// Prompt the user for custom input.
+    fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>>;
 }
+
+#[cfg(feature = "libpam")]
+const ERR_CSTR_NULL: &str = "Error, the prompt cannot contain any null bytes";
 
 #[cfg(feature = "libpam")]
 impl PamLibExt for Pam {
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
-        let cprompt = prompt
-            .map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
+        let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
         let pointer = get_user(self.0, cprompt.as_ref().map(|p| p.as_ptr()))?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p))) }
     }
@@ -70,8 +78,7 @@ impl PamLibExt for Pam {
     }
 
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
-        let cprompt = prompt
-            .map(|p| CString::new(p).expect("Error, the prompt cannot contain any null bytes"));
+        let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
         let result = get_authtok(
             self.0,
             PamItemType::AUTHTOK,
@@ -99,6 +106,36 @@ impl PamLibExt for Pam {
     fn get_ruser(&self) -> PamResult<Option<&CStr>> {
         let pointer = get_item(self.0, PamItemType::RUSER)?;
         unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
+    }
+
+    fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>> {
+        let pointer = match get_item(self.0, PamItemType::CONV)? {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let conv = unsafe { &*(pointer as *const PamConv) };
+
+        let mut resp_ptr: *mut PamResponse = ptr::null_mut();
+        let msg_cstr = CString::new(prompt.unwrap_or("")).expect(ERR_CSTR_NULL);
+        let msg = PamMessage {
+            msg_style: style,
+            msg: msg_cstr.as_ptr(),
+        };
+
+        match conv.cb.map(|cb| {
+            PamError::new(cb(
+                1,
+                &mut (&msg as *const PamMessage),
+                &mut resp_ptr,
+                conv.appdata_ptr,
+            ))
+        }) {
+            Some(PamError::SUCCESS) => {
+                Ok(unsafe { (*resp_ptr).resp }.map(|r| unsafe { CStr::from_ptr(r) }))
+            }
+            Some(ret) => Err(ret),
+            None => Ok(None),
+        }
     }
 }
 

@@ -27,8 +27,6 @@
 //! pam_module!(PamTime);
 //! ```
 
-extern crate libc;
-
 #[cfg(feature = "libpam")]
 mod libpam;
 mod pam;
@@ -38,3 +36,5 @@ pub use pam::{Pam, PamError, PamFlag, PamResult, PamServiceModule};
 
 #[cfg(feature = "libpam")]
 pub use pam::PamLibExt;
+#[cfg(feature = "libpam")]
+pub use pam_types::PamMsgStyle;
