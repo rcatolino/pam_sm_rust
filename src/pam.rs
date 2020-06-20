@@ -131,7 +131,7 @@ impl PamLibExt for Pam {
             ))
         }) {
             Some(PamError::SUCCESS) => {
-                Ok(unsafe { (*resp_ptr).resp }.map(|r| unsafe { CStr::from_ptr(r) }))
+                Ok(unsafe { (*resp_ptr).resp }.map(|r| unsafe { CStr::from_ptr(r.as_ptr()) }))
             }
             Some(ret) => Err(ret),
             None => Ok(None),
