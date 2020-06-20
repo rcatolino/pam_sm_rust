@@ -3,6 +3,7 @@
 
 use pam::PamError;
 use std::option::Option;
+use std::ptr::NonNull;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 
 pub type PamHandle = *const c_uint;
@@ -27,7 +28,7 @@ pub struct PamMessage {
 
 #[repr(C)]
 pub struct PamResponse {
-    pub resp: Option<*mut c_char>,
+    pub resp: Option<NonNull<c_char>>,
     pub resp_retcode: PamError,
 }
 
