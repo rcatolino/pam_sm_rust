@@ -84,7 +84,7 @@ impl PamLibExt for Pam {
             PamError::new(pam_get_user(
                 self.0,
                 &mut raw_user,
-                cprompt.map(|p| p.as_ptr()).unwrap_or(ptr::null()),
+                cprompt.as_ref().map_or(ptr::null(), |p| p.as_ptr()),
             ))
         };
 
@@ -111,7 +111,7 @@ impl PamLibExt for Pam {
                 self.0,
                 PamItemType::AUTHTOK as i32,
                 &mut raw_at,
-                cprompt.map(|p| p.as_ptr()).unwrap_or(ptr::null()),
+                cprompt.as_ref().map_or(ptr::null(), |p| p.as_ptr()),
             ))
         };
 
