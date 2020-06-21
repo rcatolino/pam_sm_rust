@@ -8,19 +8,6 @@ use std::fmt;
 /// Opaque PAM handle, with additional native methods available via `PamLibExt`.
 pub struct Pam(pub(crate) PamHandle);
 
-pub type PamResult<T> = Result<T, PamError>;
-
-impl PamError {
-    #[cfg(feature = "libpam")]
-    pub(crate) fn to_result<T>(self, ok: T) -> PamResult<T> {
-        if self == PamError::SUCCESS {
-            Ok(ok)
-        } else {
-            Err(self)
-        }
-    }
-}
-
 pub enum PamFlag {
     PAM_SILENT = 0x8000,
     PAM_DISALLOW_NULL_AUTHTOK = 0x0001,

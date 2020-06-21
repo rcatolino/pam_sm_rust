@@ -1,14 +1,25 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use pam::{Pam, PamError, PamResult};
+use pam::{Pam, PamError};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 use std::ffi::{CStr, CString};
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
-#[cfg(feature = "libpam")]
+pub type PamResult<T> = Result<T, PamError>;
+
+impl PamError {
+    fn to_result<T>(self, ok: T) -> PamResult<T> {
+        if self == PamError::SUCCESS {
+            Ok(ok)
+        } else {
+            Err(self)
+        }
+    }
+}
+
 const ERR_CSTR_NULL: &str = "Error, the prompt cannot contain any null bytes";
 
 /// This contains a private marker trait, used to seal private traits.
@@ -19,6 +30,9 @@ mod private {
 
 /// Extension trait over `Pam`, usually provided by the `libpam` shared library.
 pub trait PamLibExt: private::Sealed {
+    #[doc(hidden)] // End users should call the item specific methods
+    fn get_cstr_item(&self, item_type: PamItemType) -> PamResult<Option<&CStr>>;
+
     /// Get the username. If the PAM_USER item is not set, this function
     /// prompts for a username (like get_authtok).
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
@@ -44,8 +58,25 @@ pub trait PamLibExt: private::Sealed {
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>>;
 }
 
-#[cfg(feature = "libpam")]
 impl PamLibExt for Pam {
+    #[doc(hidden)]
+    fn get_cstr_item(&self, item_type: PamItemType) -> PamResult<Option<&CStr>> {
+        match item_type {
+            PamItemType::CONV | PamItemType::FAIL_DELAY | PamItemType::XAUTHDATA => {
+                panic!("Error, get_cstr_item can only be used with pam item returning c-strings")
+            }
+            _ => (),
+        }
+        let mut raw_item: *const c_void = ptr::null();
+        let r = unsafe { PamError::new(pam_get_item(self.0, item_type as c_int, &mut raw_item)) };
+        if raw_item.is_null() {
+            r.to_result(None)
+        } else {
+            // pam should keep the underlying token allocated during the lifetime of the module
+            r.to_result(Some(unsafe { CStr::from_ptr(raw_item as *const c_char) }))
+        }
+    }
+
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
         let mut raw_user: *const c_char = ptr::null();
@@ -53,7 +84,7 @@ impl PamLibExt for Pam {
             PamError::new(pam_get_user(
                 self.0,
                 &mut raw_user,
-                cprompt.map(|p| p.as_ptr()).unwrap_or(ptr::null())
+                cprompt.map(|p| p.as_ptr()).unwrap_or(ptr::null()),
             ))
         };
 
@@ -65,17 +96,11 @@ impl PamLibExt for Pam {
     }
 
     fn get_cached_user(&self) -> PamResult<Option<&CStr>> {
-        let pointer = get_item(self.0, PamItemType::USER)?;
-        unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
+        self.get_cstr_item(PamItemType::USER)
     }
 
     fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
-        // pam should keep the underlying token allocated for as long as the module is loaded
-        // which make this safe
-        unsafe {
-            let pointer = get_item(self.0, PamItemType::AUTHTOK)?;
-            Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char)))
-        }
+        self.get_cstr_item(PamItemType::AUTHTOK)
     }
 
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
@@ -108,22 +133,32 @@ impl PamLibExt for Pam {
     }
 
     fn get_rhost(&self) -> PamResult<Option<&CStr>> {
-        let pointer = get_item(self.0, PamItemType::RHOST)?;
-        unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
+        self.get_cstr_item(PamItemType::RHOST)
     }
 
     fn get_ruser(&self) -> PamResult<Option<&CStr>> {
-        let pointer = get_item(self.0, PamItemType::RUSER)?;
-        unsafe { Ok(pointer.map(|p| CStr::from_ptr(p as *const c_char))) }
+        self.get_cstr_item(PamItemType::RUSER)
     }
 
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>> {
-        let pointer = match get_item(self.0, PamItemType::CONV)? {
-            Some(p) => p,
-            None => return Ok(None),
+        let mut conv_pointer: *const c_void = ptr::null();
+        let r = unsafe {
+            PamError::new(pam_get_item(
+                self.0,
+                PamItemType::CONV as c_int,
+                &mut conv_pointer,
+            ))
         };
-        let conv = unsafe { &*(pointer as *const PamConv) };
 
+        if r != PamError::SUCCESS {
+            return Err(r);
+        }
+
+        if conv_pointer.is_null() {
+            return Ok(None);
+        }
+
+        let conv = unsafe { &*(conv_pointer as *const PamConv) };
         let mut resp_ptr: *mut PamResponse = ptr::null_mut();
         let msg_cstr = CString::new(prompt.unwrap_or("")).expect(ERR_CSTR_NULL);
         let msg = PamMessage {
@@ -148,23 +183,8 @@ impl PamLibExt for Pam {
     }
 }
 
-
-unsafe fn set_item(
-    pamh: PamHandle,
-    item_type: PamItemType,
-    item: *const c_void,
-) -> PamResult<()> {
+unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
     PamError::new(pam_set_item(pamh, item_type as c_int, item)).to_result(())
-}
-
-pub fn get_item(pamh: PamHandle, item_type: PamItemType) -> PamResult<Option<*const c_void>> {
-    let mut raw_item: *const c_void = ptr::null();
-    let r = unsafe { PamError::new(pam_get_item(pamh, item_type as c_int, &mut raw_item)) };
-    if raw_item.is_null() {
-        r.to_result(None)
-    } else {
-        r.to_result(Some(raw_item))
-    }
 }
 
 // Raw functions

@@ -3,8 +3,8 @@
 
 use pam::PamError;
 use std::option::Option;
-use std::ptr::NonNull;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::ptr::NonNull;
 
 pub type PamHandle = *const c_uint;
 

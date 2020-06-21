@@ -32,9 +32,9 @@ mod libpam;
 mod pam;
 mod pam_types;
 
-pub use pam::{Pam, PamError, PamFlag, PamResult, PamServiceModule};
+pub use pam::{Pam, PamError, PamFlag, PamServiceModule};
 
 #[cfg(feature = "libpam")]
-pub use libpam::PamLibExt;
+pub use libpam::{PamLibExt, PamResult};
 #[cfg(feature = "libpam")]
 pub use pam_types::PamMsgStyle;
