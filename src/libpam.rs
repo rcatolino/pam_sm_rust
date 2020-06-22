@@ -3,7 +3,7 @@
 
 use pam::{Pam, PamError};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, NulError};
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
@@ -19,8 +19,6 @@ impl PamError {
         }
     }
 }
-
-const ERR_CSTR_NULL: &str = "Error, the prompt cannot contain any null bytes";
 
 /// This contains a private marker trait, used to seal private traits.
 mod private {
@@ -54,6 +52,7 @@ impl Pam {
 pub trait PamLibExt: private::Sealed {
     /// Get the username. If the PAM_USER item is not set, this function
     /// prompts for a username (like get_authtok).
+    /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
 
     /// Get the username, i.e. the PAM_USER item. If it's not set return None.
@@ -63,6 +62,7 @@ pub trait PamLibExt: private::Sealed {
     fn get_cached_authtok(&self) -> PamResult<Option<&CStr>>;
 
     /// Get the cached authentication token or prompt the user for one if there isn't any.
+    /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
 
     fn set_authtok(&self, authtok: &CString) -> PamResult<()>;
@@ -74,12 +74,22 @@ pub trait PamLibExt: private::Sealed {
     fn get_ruser(&self) -> PamResult<Option<&CStr>>;
 
     /// Prompt the user for custom input.
+    /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>>;
+}
+
+impl From<NulError> for PamError {
+    fn from(_: NulError) -> PamError {
+        PamError::SERVICE_ERR
+    }
 }
 
 impl PamLibExt for Pam {
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
-        let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
+        let cprompt = match prompt {
+            None => None,
+            Some(p) => Some(CString::new(p)?)
+        };
         let mut raw_user: *const c_char = ptr::null();
         let r = unsafe {
             PamError::new(pam_get_user(
@@ -105,7 +115,10 @@ impl PamLibExt for Pam {
     }
 
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
-        let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
+        let cprompt = match prompt {
+            None => None,
+            Some(p) => Some(CString::new(p)?),
+        };
         let mut raw_at: *const c_char = ptr::null();
         let r = unsafe {
             PamError::new(pam_get_authtok(
@@ -161,7 +174,7 @@ impl PamLibExt for Pam {
 
         let conv = unsafe { &*(conv_pointer as *const PamConv) };
         let mut resp_ptr: *mut PamResponse = ptr::null_mut();
-        let msg_cstr = CString::new(prompt.unwrap_or("")).expect(ERR_CSTR_NULL);
+        let msg_cstr = CString::new(prompt.unwrap_or(""))?;
         let msg = PamMessage {
             msg_style: style,
             msg: msg_cstr.as_ptr(),
