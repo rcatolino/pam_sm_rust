@@ -28,11 +28,30 @@ mod private {
     impl Sealed for super::Pam {}
 }
 
+impl Pam {
+    // End users should call the item specific methods
+    fn get_cstr_item(&self, item_type: PamItemType) -> PamResult<Option<&CStr>> {
+        match item_type {
+            PamItemType::CONV | PamItemType::FAIL_DELAY | PamItemType::XAUTHDATA => {
+                panic!("Error, get_cstr_item can only be used with pam item returning c-strings")
+            }
+            _ => (),
+        }
+        let mut raw_item: *const c_void = ptr::null();
+        let r = unsafe { PamError::new(pam_get_item(self.0, item_type as c_int, &mut raw_item)) };
+        if raw_item.is_null() {
+            r.to_result(None)
+        } else {
+            // pam should keep the underlying token allocated during the lifetime of the module
+            r.to_result(Some(unsafe { CStr::from_ptr(raw_item as *const c_char) }))
+        }
+    }
+
+
+}
+
 /// Extension trait over `Pam`, usually provided by the `libpam` shared library.
 pub trait PamLibExt: private::Sealed {
-    #[doc(hidden)] // End users should call the item specific methods
-    fn get_cstr_item(&self, item_type: PamItemType) -> PamResult<Option<&CStr>>;
-
     /// Get the username. If the PAM_USER item is not set, this function
     /// prompts for a username (like get_authtok).
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
@@ -59,24 +78,6 @@ pub trait PamLibExt: private::Sealed {
 }
 
 impl PamLibExt for Pam {
-    #[doc(hidden)]
-    fn get_cstr_item(&self, item_type: PamItemType) -> PamResult<Option<&CStr>> {
-        match item_type {
-            PamItemType::CONV | PamItemType::FAIL_DELAY | PamItemType::XAUTHDATA => {
-                panic!("Error, get_cstr_item can only be used with pam item returning c-strings")
-            }
-            _ => (),
-        }
-        let mut raw_item: *const c_void = ptr::null();
-        let r = unsafe { PamError::new(pam_get_item(self.0, item_type as c_int, &mut raw_item)) };
-        if raw_item.is_null() {
-            r.to_result(None)
-        } else {
-            // pam should keep the underlying token allocated during the lifetime of the module
-            r.to_result(Some(unsafe { CStr::from_ptr(raw_item as *const c_char) }))
-        }
-    }
-
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = prompt.map(|p| CString::new(p).expect(ERR_CSTR_NULL));
         let mut raw_user: *const c_char = ptr::null();
