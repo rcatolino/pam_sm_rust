@@ -81,10 +81,11 @@ pub trait PamLibExt: private::Sealed {
     fn getenv(&self, name: &str) -> PamResult<Option<&CStr>>;
 
     /// Put a variable in the pam environment list.
-    /// ```name_value``` takes for form documented in pam_putent(3) :
-    /// - ```NAME=value``` will set variable ```NAME``` to value ```value```
-    /// - ```NAME=``` will set variable ```NAME``` to an empty value
-    /// - ```NAME``` will unset the variable ```NAME```
+    /// `name_value` takes for form documented in pam_putent(3) :
+    ///
+    /// - `NAME=value` will set variable `NAME` to value `value`
+    /// - `NAME=` will set variable `NAME` to an empty value
+    /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
 }
 
