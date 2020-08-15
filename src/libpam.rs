@@ -76,6 +76,16 @@ pub trait PamLibExt: private::Sealed {
     /// Prompt the user for custom input.
     /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>>;
+
+    /// Get a variable from the pam environment list.
+    fn getenv(&self, name: &str) -> PamResult<Option<&CStr>>;
+
+    /// Put a variable in the pam environment list.
+    /// ```name_value``` takes for form documented in pam_putent(3) :
+    /// - ```NAME=value``` will set variable ```NAME``` to value ```value```
+    /// - ```NAME=``` will set variable ```NAME``` to an empty value
+    /// - ```NAME``` will unset the variable ```NAME```
+    fn putenv(&self, name_value: &str) -> PamResult<()>;
 }
 
 impl From<NulError> for PamError {
@@ -193,6 +203,26 @@ impl PamLibExt for Pam {
             }
             Some(ret) => Err(ret),
             None => Ok(None),
+        }
+    }
+
+    fn getenv(&self, name: &str) -> PamResult<Option<&CStr>> {
+        let cname = CString::new(name)?;
+        let cenv = unsafe {
+            pam_getenv(self.0, cname.as_ptr())
+        };
+
+        if cenv.is_null() {
+            Ok(None)
+        } else {
+            unsafe { Ok(Some(CStr::from_ptr(cenv))) }
+        }
+    }
+
+    fn putenv(&self, name_value: &str) -> PamResult<()> {
+        let cenv = CString::new(name_value)?;
+        unsafe {
+            PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(())
         }
     }
 }
