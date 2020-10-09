@@ -61,6 +61,9 @@ pub trait PamLibExt: private::Sealed {
     /// Get the cached authentication token.
     fn get_cached_authtok(&self) -> PamResult<Option<&CStr>>;
 
+    /// Get the cached old authentication token.
+    fn get_cached_oldauthtok(&self) -> PamResult<Option<&CStr>>;
+
     /// Get the cached authentication token or prompt the user for one if there isn't any.
     /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>>;
@@ -123,6 +126,10 @@ impl PamLibExt for Pam {
 
     fn get_cached_authtok(&self) -> PamResult<Option<&CStr>> {
         self.get_cstr_item(PamItemType::AUTHTOK)
+    }
+
+    fn get_cached_oldauthtok(&self) -> PamResult<Option<&CStr>> {
+        self.get_cstr_item(PamItemType::OLDAUTHTOK)
     }
 
     fn get_authtok(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
