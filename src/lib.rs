@@ -14,7 +14,7 @@
 //!
 //! impl PamServiceModule for PamTime {
 //!     fn authenticate(pamh: Pam, _: PamFlag, args: Vec<String>) -> PamError {
-//!         let hour = time::now().tm_hour;
+//!         let hour = time::OffsetDateTime::now_utc().hour();
 //!         if hour != 4 {
 //!             // Only allow authentication when it's 4 AM
 //!             PamError::SUCCESS
@@ -35,6 +35,6 @@ mod pam_types;
 pub use pam::{Pam, PamError, PamFlag, PamServiceModule};
 
 #[cfg(feature = "libpam")]
-pub use libpam::{PamLibExt, PamResult};
+pub use libpam::{PamData, PamLibExt, PamResult};
 #[cfg(feature = "libpam")]
 pub use pam_types::PamMsgStyle;

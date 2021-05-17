@@ -9,7 +9,7 @@ keywords = ["pam", "service", "module", "wrapper", "ffi"]
 categories = ["os::unix-apis", "authentication", "api-bindings"]
 
 [dev-dependencies]
-time = "^0.1.37"
+time = "^0.2"
 
 [features]
 libpam = []

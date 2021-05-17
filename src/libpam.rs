@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
-use pam::{Pam, PamError};
+use pam::{Pam, PamError, PamFlag};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 use std::ffi::{CStr, CString, NulError};
 use std::option::Option;
@@ -9,6 +9,10 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 pub type PamResult<T> = Result<T, PamError>;
+
+pub trait PamData: Sync {
+    fn cleanup(&mut self, _pam: Pam, _flags: i32, _status: PamError) {}
+}
 
 impl PamError {
     fn to_result<T>(self, ok: T) -> PamResult<T> {
@@ -44,8 +48,6 @@ impl Pam {
             r.to_result(Some(unsafe { CStr::from_ptr(raw_item as *const c_char) }))
         }
     }
-
-
 }
 
 /// Extension trait over `Pam`, usually provided by the `libpam` shared library.
@@ -90,6 +92,8 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME=` will set variable `NAME` to an empty value
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
+
+    fn set_data<T: PamData>(&self, module_name: &str, data: Box<T>) -> PamResult<()>;
 }
 
 impl From<NulError> for PamError {
@@ -102,7 +106,7 @@ impl PamLibExt for Pam {
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = match prompt {
             None => None,
-            Some(p) => Some(CString::new(p)?)
+            Some(p) => Some(CString::new(p)?),
         };
         let mut raw_user: *const c_char = ptr::null();
         let r = unsafe {
@@ -216,9 +220,7 @@ impl PamLibExt for Pam {
 
     fn getenv(&self, name: &str) -> PamResult<Option<&CStr>> {
         let cname = CString::new(name)?;
-        let cenv = unsafe {
-            pam_getenv(self.0, cname.as_ptr())
-        };
+        let cenv = unsafe { pam_getenv(self.0, cname.as_ptr()) };
 
         if cenv.is_null() {
             Ok(None)
@@ -229,10 +231,34 @@ impl PamLibExt for Pam {
 
     fn putenv(&self, name_value: &str) -> PamResult<()> {
         let cenv = CString::new(name_value)?;
-        unsafe {
-            PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(())
-        }
+        unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
+
+    // T has to be boxed because it will outlive the call stack
+    fn set_data<T: PamData>(&self, module_name: &str, data: Box<T>) -> PamResult<()> {
+        // This needs unsafe because pam_data_cleanup is unsafe if T is different than what
+        // was used in pam_set_data.
+        PamError::new(unsafe {
+            pam_set_data(
+                self.0,
+                CString::new(module_name)?.as_ptr(),
+                Box::into_raw(data) as *mut c_void,
+                Some(pam_data_cleanup::<T>),
+            )
+        })
+        .to_result(())
+    }
+}
+
+unsafe extern "C" fn pam_data_cleanup<T: PamData>(
+    handle: PamHandle,
+    data: *mut c_void,
+    error_status: c_int,
+) {
+    let mut flags = 0i32;
+    flags |= error_status & PamFlag::PAM_DATA_REPLACE as i32;
+    flags |= error_status & PamFlag::PAM_SILENT as i32;
+    Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
 }
 
 unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
@@ -253,7 +279,7 @@ extern "C" {
         pamh: PamHandle,
         module_data_name: *const c_char,
         data: *mut c_void,
-        cleanup: Option<extern "C" fn(arg1: PamHandle, arg2: *mut c_void, arg3: c_int)>,
+        cleanup: Option<unsafe extern "C" fn(_: PamHandle, _: *mut c_void, _: c_int)>,
     ) -> c_int;
     pub fn pam_get_data(
         pamh: PamHandle,

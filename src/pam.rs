@@ -9,6 +9,7 @@ use std::fmt;
 pub struct Pam(pub(crate) PamHandle);
 
 pub enum PamFlag {
+    PAM_DATA_REPLACE = 0x20000000,
     PAM_SILENT = 0x8000,
     PAM_DISALLOW_NULL_AUTHTOK = 0x0001,
     ESTABLISH_CRED = 0x0002,
