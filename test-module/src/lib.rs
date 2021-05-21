@@ -3,17 +3,20 @@ extern crate pamsm;
 extern crate time;
 
 use pamsm::{Pam, PamData, PamError, PamFlag, PamLibExt, PamServiceModule};
+use std::rc::Rc;
 
 struct PamTime;
 
+#[derive(Debug)]
 struct DateTime(time::OffsetDateTime);
+#[derive(Debug)]
 struct Test {
     status: bool,
     hour: u8,
 }
 
 impl PamData for DateTime {
-    fn cleanup(&mut self, _pam: Pam, flags: i32, status: PamError) {
+    fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
         if (flags & PamFlag::PAM_SILENT as i32) == 0 {
             println!(
                 "PamTime cleanup date time. Last authentication at {}, result {}, flags {}",
@@ -27,7 +30,7 @@ impl PamData for DateTime {
 }
 
 impl PamData for Test {
-    fn cleanup(&mut self, _pam: Pam, flags: i32, status: PamError) {
+    fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
         if (flags & PamFlag::PAM_SILENT as i32) == 0 {
             println!(
                 "PamTime cleanup test. Last authentication at {}h : {}, result {}, flags {}",
@@ -56,21 +59,34 @@ impl PamServiceModule for PamTime {
         };
 
         let hour = now.0.hour();
-        match pamh.set_data("pamtime", Box::new(now)) {
-            Err(e) => return e,
-            Ok(_) => (),
-        };
-
         let test = Test {
             status: hour != 4 && user.to_str().unwrap_or("") == "root",
             hour: hour,
         };
 
         let status = test.status;
-        match pamh.set_data("pamtime", Box::new(test)) {
+        match pamh.set_data("pamtime", Rc::new(test)) {
             Err(e) => return e,
             Ok(_) => (),
         };
+
+        let t : Rc<Test> = match unsafe { pamh.get_data("pamtime") } {
+            Err(e) => return e,
+            Ok(tref) => tref
+        };
+
+        match pamh.set_data("pamtime", Rc::new(now)) {
+            Err(e) => return e,
+            Ok(_) => (),
+        };
+
+        let s : Rc<DateTime> = match unsafe { pamh.get_data("pamtime") } {
+            Err(e) => return e,
+            Ok(tref) => tref
+        };
+
+        println!("{} {:?}", Rc::strong_count(&t), t);
+        println!("{} {:?}", Rc::strong_count(&s), s);
 
         if status {
             PamError::SUCCESS
