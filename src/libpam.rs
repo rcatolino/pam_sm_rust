@@ -7,11 +7,12 @@ use std::ffi::{CStr, CString, NulError};
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
+use std::rc::Rc;
 
 pub type PamResult<T> = Result<T, PamError>;
 
 pub trait PamData: Sync {
-    fn cleanup(&mut self, _pam: Pam, _flags: i32, _status: PamError) {}
+    fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
 }
 
 impl PamError {
@@ -93,7 +94,8 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
 
-    fn set_data<T: PamData>(&self, module_name: &str, data: Box<T>) -> PamResult<()>;
+    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>>;
+    fn set_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()>;
 }
 
 impl From<NulError> for PamError {
@@ -234,15 +236,24 @@ impl PamLibExt for Pam {
         unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
 
+    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>> {
+        let mut data_ptr : *const c_void = ptr::null();
+        PamError::new(pam_get_data(
+            self.0,
+            CString::new(module_name)?.as_ptr(),
+            &mut data_ptr,
+        )).to_result(data_ptr as *const T).map(|ptr| Rc::from_raw(ptr))
+    }
+
     // T has to be boxed because it will outlive the call stack
-    fn set_data<T: PamData>(&self, module_name: &str, data: Box<T>) -> PamResult<()> {
+    fn set_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()> {
         // This needs unsafe because pam_data_cleanup is unsafe if T is different than what
         // was used in pam_set_data.
         PamError::new(unsafe {
             pam_set_data(
                 self.0,
                 CString::new(module_name)?.as_ptr(),
-                Box::into_raw(data) as *mut c_void,
+                Rc::into_raw(data) as *mut c_void,
                 Some(pam_data_cleanup::<T>),
             )
         })
@@ -258,7 +269,7 @@ unsafe extern "C" fn pam_data_cleanup<T: PamData>(
     let mut flags = 0i32;
     flags |= error_status & PamFlag::PAM_DATA_REPLACE as i32;
     flags |= error_status & PamFlag::PAM_SILENT as i32;
-    Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
+    Rc::from_raw(data as *const T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
 }
 
 unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
