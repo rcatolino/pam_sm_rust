@@ -3,6 +3,7 @@
 
 use pam::{Pam, PamError, PamFlag};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
+use std::mem;
 use std::ffi::{CStr, CString, NulError};
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
@@ -94,8 +95,14 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
 
-    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>>;
+    /// Store an `Rc<T>` pointer with libpam under the name `module_name`
     fn set_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()>;
+
+    /// Get back the `Rc<T>` pointer associated with `module_name` from libpam
+    /// # Safety
+    /// The type parameter `T` must be the same as the one used in `set_data`
+    /// with the name `module_name`.
+    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>>;
 }
 
 impl From<NulError> for PamError {
@@ -242,7 +249,16 @@ impl PamLibExt for Pam {
             self.0,
             CString::new(module_name)?.as_ptr(),
             &mut data_ptr,
-        )).to_result(data_ptr as *const T).map(|ptr| Rc::from_raw(ptr))
+        )).to_result(data_ptr as *const T).map(|ptr| {
+            let r = Rc::from_raw(ptr);
+            // Pam still has a reference to data, which will be returned from future
+            // pam_get_data calls, and given as a parameter to the cleanup callback.
+            // If we return r to the caller, the reference count will drop to zero when
+            // r is dropped, and the reference held by pam will become invalid.
+            // Therefore we artificially increase the refcount to account for pam's reference
+            mem::forget(Rc::clone(&r));
+            r
+        })
     }
 
     // T has to be boxed because it will outlive the call stack
