@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 pub type PamResult<T> = Result<T, PamError>;
 
-pub trait PamData: Sync {
+pub trait PamData {
     fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
 }
 
@@ -243,28 +243,30 @@ impl PamLibExt for Pam {
         unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
 
-    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>> {
+    unsafe fn get_shared_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>> {
         let mut data_ptr : *const c_void = ptr::null();
         PamError::new(pam_get_data(
             self.0,
             CString::new(module_name)?.as_ptr(),
             &mut data_ptr,
         )).to_result(data_ptr as *const T).map(|ptr| {
-            let r = Rc::from_raw(ptr);
-            // Pam still has a reference to data, which will be returned from future
-            // pam_get_data calls, and given as a parameter to the cleanup callback.
-            // If we return r to the caller, the reference count will drop to zero when
-            // r is dropped, and the reference held by pam will become invalid.
-            // Therefore we artificially increase the refcount to account for pam's reference
-            mem::forget(Rc::clone(&r));
-            r
+            let data = Rc::from_raw(ptr);
+            // We are effectively creating a new reference to data without incrementing
+            // the reference count, while pam keeps a reference to the data,
+            // which will be returned from future pam_get_data calls,
+            // and given as a parameter to the cleanup callback.
+            // Therefore we artificially increase the refcount to account for this
+            // new reference :
+            mem::forget(Rc::clone(&data));
+            data
         })
     }
 
-    // T has to be boxed because it will outlive the call stack
-    fn set_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()> {
-        // This needs unsafe because pam_data_cleanup is unsafe if T is different than what
-        // was used in pam_set_data.
+    // The data has to be allocated on the heap because it will outlive the call stack.
+    // Moreover, get_data effectively allows to create many references to the data
+    // without tracking by the borow checker.
+    // Hence the use of Rc<T> to track the references at runtime.
+    fn share_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()> {
         PamError::new(unsafe {
             pam_set_data(
                 self.0,
@@ -275,6 +277,7 @@ impl PamLibExt for Pam {
         })
         .to_result(())
     }
+
 }
 
 unsafe extern "C" fn pam_data_cleanup<T: PamData>(
