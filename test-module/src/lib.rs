@@ -3,11 +3,11 @@ extern crate pamsm;
 extern crate time;
 
 use pamsm::{Pam, PamData, PamError, PamFlag, PamLibExt, PamServiceModule};
-use std::rc::Rc;
+use std::sync::Arc;
 
 struct PamTime;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct DateTime(time::OffsetDateTime);
 #[derive(Debug)]
 struct Test {
@@ -65,28 +65,29 @@ impl PamServiceModule for PamTime {
         };
 
         let status = test.status;
-        match pamh.set_data("pamtime", Rc::new(test)) {
+        match pamh.send_data("pamtime", Arc::new(test)) {
             Err(e) => return e,
             Ok(_) => (),
         };
 
-        let t : Rc<Test> = match unsafe { pamh.get_data("pamtime") } {
+        let t : Arc<Test> = match unsafe { pamh.get_cloned_data("pamtime") } {
             Err(e) => return e,
             Ok(tref) => tref
         };
 
-        match pamh.set_data("pamtime", Rc::new(now)) {
+        println!("{} {:?}", Arc::strong_count(&t), t);
+
+        match pamh.send_data("pamtime", now) {
             Err(e) => return e,
             Ok(_) => (),
         };
 
-        let s : Rc<DateTime> = match unsafe { pamh.get_data("pamtime") } {
+        let s : DateTime = match unsafe { pamh.get_cloned_data("pamtime") } {
             Err(e) => return e,
             Ok(tref) => tref
         };
 
-        println!("{} {:?}", Rc::strong_count(&t), t);
-        println!("{} {:?}", Rc::strong_count(&s), s);
+        println!("{:?}", s);
 
         if status {
             PamError::SUCCESS

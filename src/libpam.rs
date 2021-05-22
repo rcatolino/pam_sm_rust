@@ -3,17 +3,25 @@
 
 use pam::{Pam, PamError, PamFlag};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
-use std::mem;
 use std::ffi::{CStr, CString, NulError};
+use std::ops::Deref;
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
-use std::rc::Rc;
 
 pub type PamResult<T> = Result<T, PamError>;
 
 pub trait PamData {
     fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
+}
+
+impl<T: PamData, U> PamData for U
+where
+    U: Deref<Target = T>,
+{
+    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+        T::cleanup(&*self, pam, flags, status)
+    }
 }
 
 impl PamError {
@@ -95,14 +103,24 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
 
-    /// Store an `Rc<T>` pointer with libpam under the name `module_name`
-    fn set_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()>;
+    /// Sends data to be stored by the pam library under the name `module_name`.
+    /// The data can then be retrieved from a different
+    /// callback in this module, or even by a different module
+    /// using `retrieve_data`.
+    ///
+    /// When this method is called a second time with the same `module_name`, the method
+    /// `cleanup` is called on `data`. The same happens when the application calls `pam_end (3)`
+    fn send_data<T: PamData + Clone + Send>(&self, module_name: &str, data: T) -> PamResult<()>;
 
-    /// Get back the `Rc<T>` pointer associated with `module_name` from libpam
+    /// Retrieves data previously stored with `send_data<T>`.
+    ///
+    /// Note that the result is a _copy_ of the data and not a shared reference,
+    /// which differs from the behavior of the underlying `pam_get_data (3)` function.
+    /// If you want to share the data instead you must wrap it in `Arc`.
     /// # Safety
     /// The type parameter `T` must be the same as the one used in `set_data`
     /// with the name `module_name`.
-    unsafe fn get_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>>;
+    unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T>;
 }
 
 impl From<NulError> for PamError {
@@ -243,44 +261,34 @@ impl PamLibExt for Pam {
         unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
 
-    unsafe fn get_shared_data<T: PamData>(&self, module_name: &str) -> PamResult<Rc<T>> {
-        let mut data_ptr : *const c_void = ptr::null();
-        PamError::new(pam_get_data(
-            self.0,
-            CString::new(module_name)?.as_ptr(),
-            &mut data_ptr,
-        )).to_result(data_ptr as *const T).map(|ptr| {
-            let data = Rc::from_raw(ptr);
-            // We are effectively creating a new reference to data without incrementing
-            // the reference count, while pam keeps a reference to the data,
-            // which will be returned from future pam_get_data calls,
-            // and given as a parameter to the cleanup callback.
-            // Therefore we artificially increase the refcount to account for this
-            // new reference :
-            mem::forget(Rc::clone(&data));
-            data
-        })
-    }
-
-    // The data has to be allocated on the heap because it will outlive the call stack.
-    // Moreover, get_data effectively allows to create many references to the data
-    // without tracking by the borow checker.
-    // Hence the use of Rc<T> to track the references at runtime.
-    fn share_data<T: PamData>(&self, module_name: &str, data: Rc<T>) -> PamResult<()> {
+    fn send_data<T: PamData + Clone + Send>(&self, module_name: &str, data: T) -> PamResult<()> {
+        // The data has to be allocated on the heap because it will outlive the call stack.
+        let data_copy = Box::new(data);
         PamError::new(unsafe {
             pam_set_data(
                 self.0,
                 CString::new(module_name)?.as_ptr(),
-                Rc::into_raw(data) as *mut c_void,
+                Box::into_raw(data_copy) as *mut c_void,
                 Some(pam_data_cleanup::<T>),
             )
         })
         .to_result(())
     }
 
+    unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T> {
+        let mut data_ptr: *const c_void = ptr::null();
+        // pam_get_data should be safe as long as T is the type that what used in send_data.
+        PamError::new(pam_get_data(
+            self.0,
+            CString::new(module_name)?.as_ptr(),
+            &mut data_ptr,
+        ))
+        .to_result(data_ptr as *const T)
+        .map(|ptr| (*ptr).clone()) // pam guaranties the data is valid when SUCCESS is returned.
+    }
 }
 
-unsafe extern "C" fn pam_data_cleanup<T: PamData>(
+unsafe extern "C" fn pam_data_cleanup<T: PamData + Clone + Send>(
     handle: PamHandle,
     data: *mut c_void,
     error_status: c_int,
@@ -288,7 +296,7 @@ unsafe extern "C" fn pam_data_cleanup<T: PamData>(
     let mut flags = 0i32;
     flags |= error_status & PamFlag::PAM_DATA_REPLACE as i32;
     flags |= error_status & PamFlag::PAM_SILENT as i32;
-    Rc::from_raw(data as *const T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
+    Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
 }
 
 unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
