@@ -55,6 +55,21 @@ pub trait PamData {
     fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
 }
 
+impl PamData for PamByteData {
+    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+        (self.cb)(&self.data, pam, flags, status)
+    }
+}
+
+/// Prototype of the callback used with [`PamLibExt::send_bytes`]
+pub type PamCleanupCb = fn(&Vec<u8>, Pam, i32, PamError);
+
+#[derive(Clone)]
+struct PamByteData {
+    cb: PamCleanupCb,
+    data: Vec<u8>,
+}
+
 /// Blanket implementation for types that implement `Deref<T>` when `T` implements `PamData`.
 impl<T: PamData, U> PamData for U
 where
@@ -151,7 +166,18 @@ pub trait PamLibExt: private::Sealed {
     ///
     /// When this method is called a second time with the same `module_name`, the method
     /// `cleanup` is called on `data`. The same happens when the application calls `pam_end (3)`
-    fn send_data<T: PamData + Clone + Send>(&self, module_name: &str, data: T) -> PamResult<()>;
+    ///
+    /// If your data can be converted into / from [`Vec<u8>`][std::vec::Vec]
+    /// you should consider using the [`send_bytes`][Self::send_bytes] method instead.
+    ///
+    /// # Safety
+    /// This method should not be used if the [`send_bytes`][Self::send_bytes] method is also used
+    /// with the same `module_name`.
+    unsafe fn send_data<T: PamData + Clone + Send>(
+        &self,
+        module_name: &str,
+        data: T,
+    ) -> PamResult<()>;
 
     /// Retrieves data previously stored with [`send_data<T>`][Self::send_data].
     ///
@@ -163,6 +189,9 @@ pub trait PamLibExt: private::Sealed {
     /// [`send_data<T>`][Self::send_data]
     /// with the name `module_name`.
     unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T>;
+
+    fn send_bytes(&self, module_name: &str, data: Vec<u8>, cb: PamCleanupCb) -> PamResult<()>;
+    fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>>;
 }
 
 impl From<NulError> for PamError {
@@ -303,17 +332,19 @@ impl PamLibExt for Pam {
         unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
 
-    fn send_data<T: PamData + Clone + Send>(&self, module_name: &str, data: T) -> PamResult<()> {
+    unsafe fn send_data<T: PamData + Clone + Send>(
+        &self,
+        module_name: &str,
+        data: T,
+    ) -> PamResult<()> {
         // The data has to be allocated on the heap because it will outlive the call stack.
         let data_copy = Box::new(data);
-        PamError::new(unsafe {
-            pam_set_data(
-                self.0,
-                CString::new(module_name)?.as_ptr(),
-                Box::into_raw(data_copy) as *mut c_void,
-                Some(pam_data_cleanup::<T>),
-            )
-        })
+        PamError::new(pam_set_data(
+            self.0,
+            CString::new(module_name)?.as_ptr(),
+            Box::into_raw(data_copy) as *mut c_void,
+            Some(pam_data_cleanup::<T>),
+        ))
         .to_result(())
     }
 
@@ -327,6 +358,15 @@ impl PamLibExt for Pam {
         ))
         .to_result(data_ptr as *const T)
         .map(|ptr| (*ptr).clone()) // pam guaranties the data is valid when SUCCESS is returned.
+    }
+
+    fn send_bytes(&self, module_name: &str, data: Vec<u8>, cb: PamCleanupCb) -> PamResult<()> {
+        let data_cb = PamByteData { data: data, cb: cb };
+        unsafe { self.send_data(module_name, data_cb) }
+    }
+
+    fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>> {
+        unsafe { self.retrieve_data::<PamByteData>(module_name) }.map(|data_cb| data_cb.data)
     }
 }
 
