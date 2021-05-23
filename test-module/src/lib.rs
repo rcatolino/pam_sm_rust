@@ -1,46 +1,43 @@
 #[macro_use]
 extern crate pamsm;
-extern crate time;
 
 use pamsm::{Pam, PamData, PamError, PamFlag, PamLibExt, PamServiceModule};
-use std::sync::Arc;
+use std::time::Instant;
 
 struct PamTime;
 
 #[derive(Debug,Clone)]
-struct DateTime(time::OffsetDateTime);
-#[derive(Debug)]
-struct Test {
-    status: bool,
-    hour: u8,
-}
+struct SessionStart(Instant);
 
-impl PamData for DateTime {
+impl PamData for SessionStart {
     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
-        if (flags & PamFlag::PAM_SILENT as i32) == 0 {
+        if (flags & PamFlag::SILENT as i32) == 0 {
             println!(
-                "PamTime cleanup date time. Last authentication at {}, result {}, flags {}",
-                self.0, status, flags
+                "PamTime cleanup. Session opened for {:?}, result {}, flags {}",
+                self.0.elapsed(), status, flags
             );
-            if (flags & PamFlag::PAM_DATA_REPLACE as i32) != 0 {
+            if (flags & PamFlag::DATA_REPLACE as i32) != 0 {
                 println!("Pam data is being replaced");
             }
         }
     }
 }
 
-impl PamData for Test {
-    fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
-        if (flags & PamFlag::PAM_SILENT as i32) == 0 {
-            println!(
-                "PamTime cleanup test. Last authentication at {}h : {}, result {}, flags {}",
-                self.hour, self.status, status, flags
-            );
-        }
-    }
-}
-
 impl PamServiceModule for PamTime {
+    fn open_session(pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
+        let now = SessionStart(Instant::now());
+        match pamh.send_data("pamtime", now) {
+            Err(e) => return e,
+            Ok(_) => (),
+        };
+
+        PamError::SUCCESS
+    }
+
+    fn close_session(_pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
+        PamError::SUCCESS
+    }
+
     fn authenticate(pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
         // If you need password here, that works like this:
         //
@@ -50,46 +47,20 @@ impl PamServiceModule for PamTime {
         //      Err(e) => return e,
         //  };
 
-        // Only allow authentication when it's not 4 AM and user name is root
-        let now = DateTime(time::OffsetDateTime::now_utc());
+        // Only allow authentication when user name is root and the session is less than a minute
+        // old
         let user = match pamh.get_user(None) {
             Ok(Some(u)) => u,
             Ok(None) => return PamError::USER_UNKNOWN,
             Err(e) => return e,
         };
 
-        let hour = now.0.hour();
-        let test = Test {
-            status: hour != 4 && user.to_str().unwrap_or("") == "root",
-            hour: hour,
-        };
-
-        let status = test.status;
-        match pamh.send_data("pamtime", Arc::new(test)) {
-            Err(e) => return e,
-            Ok(_) => (),
-        };
-
-        let t : Arc<Test> = match unsafe { pamh.get_cloned_data("pamtime") } {
+        let s : SessionStart = match unsafe { pamh.retrieve_data("pamtime") } {
             Err(e) => return e,
             Ok(tref) => tref
         };
 
-        println!("{} {:?}", Arc::strong_count(&t), t);
-
-        match pamh.send_data("pamtime", now) {
-            Err(e) => return e,
-            Ok(_) => (),
-        };
-
-        let s : DateTime = match unsafe { pamh.get_cloned_data("pamtime") } {
-            Err(e) => return e,
-            Ok(tref) => tref
-        };
-
-        println!("{:?}", s);
-
-        if status {
+        if user.to_str().unwrap_or("") == "root" && s.0.elapsed().as_secs() < 60 {
             PamError::SUCCESS
         } else {
             PamError::AUTH_ERR

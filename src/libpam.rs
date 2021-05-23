@@ -11,10 +11,51 @@ use std::ptr;
 
 pub type PamResult<T> = Result<T, PamError>;
 
+/// Trait to implement for data stored with pam using [`PamLibExt::send_data`]
+/// # Example
+/// ```
+/// type Token = [u8; 128];
+/// impl PamData for Token {
+///     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
+///         if PamFlag::DATA_REPLACE & flags == 0 && status == PamError::SUCCESS {
+///             persist(self);
+///         }
+///     }
+/// }
+///
+/// ...
+///
+/// impl PamServiceModule for MyModule {
+///     fn open_session(...) {
+///         match self.send_data("example_module", Token::new()) {
+///             Err(e) => return e,
+///             Ok(_) => (),
+///         }
+///
+///         PamError::SUCCESS
+///     }
+///
+///     fn authenticate(...) {
+///         let res = match self.retrieve_data("example_module") {
+///             Err(e) => return e,
+///             Ok(token) => random_service::authenticate(token, "password")
+///         };
+///
+///         if res == 200 {
+///             PamError::SUCCESS
+///         } else {
+///             PamError::AUTHTOK_ERR
+///         }
+///     }
+/// }
+/// ```
 pub trait PamData {
+    /// The cleanup method will be called before the data is dropped by pam.
+    /// See `pam_set_data (3)`
     fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
 }
 
+/// Blanket implementation for types that implement `Deref<T>` when `T` implements `PamData`.
 impl<T: PamData, U> PamData for U
 where
     U: Deref<Target = T>,
@@ -106,19 +147,20 @@ pub trait PamLibExt: private::Sealed {
     /// Sends data to be stored by the pam library under the name `module_name`.
     /// The data can then be retrieved from a different
     /// callback in this module, or even by a different module
-    /// using `retrieve_data`.
+    /// using [`retrieve_data<T>`][Self::retrieve_data].
     ///
     /// When this method is called a second time with the same `module_name`, the method
     /// `cleanup` is called on `data`. The same happens when the application calls `pam_end (3)`
     fn send_data<T: PamData + Clone + Send>(&self, module_name: &str, data: T) -> PamResult<()>;
 
-    /// Retrieves data previously stored with `send_data<T>`.
+    /// Retrieves data previously stored with [`send_data<T>`][Self::send_data].
     ///
     /// Note that the result is a _copy_ of the data and not a shared reference,
     /// which differs from the behavior of the underlying `pam_get_data (3)` function.
-    /// If you want to share the data instead you must wrap it in `Arc`.
+    /// If you want to share the data instead you can wrap it in [`Arc`][std::sync::Arc].
     /// # Safety
-    /// The type parameter `T` must be the same as the one used in `set_data`
+    /// The type parameter `T` must be the same as the one used in
+    /// [`send_data<T>`][Self::send_data]
     /// with the name `module_name`.
     unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T>;
 }
@@ -294,8 +336,8 @@ unsafe extern "C" fn pam_data_cleanup<T: PamData + Clone + Send>(
     error_status: c_int,
 ) {
     let mut flags = 0i32;
-    flags |= error_status & PamFlag::PAM_DATA_REPLACE as i32;
-    flags |= error_status & PamFlag::PAM_SILENT as i32;
+    flags |= error_status & PamFlag::DATA_REPLACE as i32;
+    flags |= error_status & PamFlag::SILENT as i32;
     Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
 }
 
