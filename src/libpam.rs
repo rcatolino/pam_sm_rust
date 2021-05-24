@@ -10,41 +10,36 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 pub type PamResult<T> = Result<T, PamError>;
+/// Prototype of the callback used with [`PamLibExt::send_bytes`]
+pub type PamCleanupCb = fn(&Vec<u8>, Pam, i32, PamError);
+
+#[derive(Clone)]
+struct PamByteData {
+    cb: Option<PamCleanupCb>,
+    data: Vec<u8>,
+}
 
 /// Trait to implement for data stored with pam using [`PamLibExt::send_data`]
+/// in order to provide a cleanup callback.
 /// # Example
 /// ```
-/// type Token = [u8; 128];
+/// extern crate pamsm;
+/// use pamsm::{Pam, PamData, PamError, PamFlag};
+/// use std::fs::write;
+///
+/// struct Token([u8; 128]);
+///
 /// impl PamData for Token {
 ///     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
-///         if PamFlag::DATA_REPLACE & flags == 0 && status == PamError::SUCCESS {
-///             persist(self);
-///         }
-///     }
-/// }
-///
-/// ...
-///
-/// impl PamServiceModule for MyModule {
-///     fn open_session(...) {
-///         match self.send_data("example_module", Token::new()) {
-///             Err(e) => return e,
-///             Ok(_) => (),
-///         }
-///
-///         PamError::SUCCESS
-///     }
-///
-///     fn authenticate(...) {
-///         let res = match self.retrieve_data("example_module") {
-///             Err(e) => return e,
-///             Ok(token) => random_service::authenticate(token, "password")
-///         };
-///
-///         if res == 200 {
-///             PamError::SUCCESS
-///         } else {
-///             PamError::AUTHTOK_ERR
+///         if PamFlag::DATA_REPLACE as i32 & flags == 0 && status == PamError::SUCCESS {
+///             match write(".token.bin", self.0) {
+///                 Ok(_) => (),
+///                 Err(err) => {
+///                     if PamFlag::SILENT as i32 & flags == 0 {
+///                         println!("Error persisting token : {:?}", err);
+///                     }
+///                 }
+///             };
 ///         }
 ///     }
 /// }
@@ -57,17 +52,8 @@ pub trait PamData {
 
 impl PamData for PamByteData {
     fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
-        (self.cb)(&self.data, pam, flags, status)
+        self.cb.map(|cb| (cb)(&self.data, pam, flags, status))
     }
-}
-
-/// Prototype of the callback used with [`PamLibExt::send_bytes`]
-pub type PamCleanupCb = fn(&Vec<u8>, Pam, i32, PamError);
-
-#[derive(Clone)]
-struct PamByteData {
-    cb: PamCleanupCb,
-    data: Vec<u8>,
 }
 
 /// Blanket implementation for types that implement `Deref<T>` when `T` implements `PamData`.
@@ -159,13 +145,14 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
 
-    /// Sends data to be stored by the pam library under the name `module_name`.
+    /// Send data to be stored by the pam library under the name `module_name`.
     /// The data can then be retrieved from a different
     /// callback in this module, or even by a different module
     /// using [`retrieve_data<T>`][Self::retrieve_data].
     ///
     /// When this method is called a second time with the same `module_name`, the method
-    /// `cleanup` is called on `data`. The same happens when the application calls `pam_end (3)`
+    /// [`PamData::cleanup`] is called on the data previously stored.
+    /// The same happens when the application calls `pam_end (3)`
     ///
     /// If your data can be converted into / from [`Vec<u8>`][std::vec::Vec]
     /// you should consider using the [`send_bytes`][Self::send_bytes] method instead.
@@ -179,18 +166,32 @@ pub trait PamLibExt: private::Sealed {
         data: T,
     ) -> PamResult<()>;
 
-    /// Retrieves data previously stored with [`send_data<T>`][Self::send_data].
+    /// Retrieve data previously stored with [`send_data<T>`][Self::send_data].
     ///
     /// Note that the result is a _copy_ of the data and not a shared reference,
     /// which differs from the behavior of the underlying `pam_get_data (3)` function.
+    ///
     /// If you want to share the data instead you can wrap it in [`Arc`][std::sync::Arc].
     /// # Safety
     /// The type parameter `T` must be the same as the one used in
-    /// [`send_data<T>`][Self::send_data]
-    /// with the name `module_name`.
+    /// [`send_data<T>`][Self::send_data] with the name `module_name`.
+    ///
+    /// If the data was stored with [`send_bytes`][Self::send_bytes] you must use
+    /// [`retrieve_bytes`][Self::retrieve_bytes] instead.
     unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T>;
 
-    fn send_bytes(&self, module_name: &str, data: Vec<u8>, cb: PamCleanupCb) -> PamResult<()>;
+    /// Similar to [`send_data`][Self::send_data], but only works with [`Vec<u8>`][std::vec::Vec].
+    /// The PamData trait doesn't have to be implemented on the data, a callback can be passed
+    /// as an argument instead.
+    fn send_bytes(
+        &self,
+        module_name: &str,
+        data: Vec<u8>,
+        cb: Option<PamCleanupCb>,
+    ) -> PamResult<()>;
+
+    /// Retrieve bytes previously stored with [`send_bytes`][Self::send_bytes].
+    /// The result is a clone of the data.
     fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>>;
 }
 
@@ -360,7 +361,12 @@ impl PamLibExt for Pam {
         .map(|ptr| (*ptr).clone()) // pam guaranties the data is valid when SUCCESS is returned.
     }
 
-    fn send_bytes(&self, module_name: &str, data: Vec<u8>, cb: PamCleanupCb) -> PamResult<()> {
+    fn send_bytes(
+        &self,
+        module_name: &str,
+        data: Vec<u8>,
+        cb: Option<PamCleanupCb>,
+    ) -> PamResult<()> {
         let data_cb = PamByteData { data: data, cb: cb };
         unsafe { self.send_data(module_name, data_cb) }
     }
