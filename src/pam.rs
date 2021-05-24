@@ -1,6 +1,7 @@
 // Copyright (c) 2017 raphael.catolino@gmail.com
 
 #![allow(non_camel_case_types)]
+#![allow(clippy::upper_case_acronyms)]
 
 use pam_types::PamHandle;
 use std::fmt;

@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#![allow(non_camel_case_types)]
 
 use pam::{Pam, PamError, PamFlag};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
@@ -52,7 +51,9 @@ pub trait PamData {
 
 impl PamData for PamByteData {
     fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
-        self.cb.map(|cb| (cb)(&self.data, pam, flags, status))
+        if let Some(cb) = self.cb {
+            (cb)(&self.data, pam, flags, status);
+        }
     }
 }
 
@@ -367,7 +368,7 @@ impl PamLibExt for Pam {
         data: Vec<u8>,
         cb: Option<PamCleanupCb>,
     ) -> PamResult<()> {
-        let data_cb = PamByteData { data: data, cb: cb };
+        let data_cb = PamByteData { data, cb };
         unsafe { self.send_data(module_name, data_cb) }
     }
 
