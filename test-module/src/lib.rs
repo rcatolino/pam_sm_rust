@@ -1,12 +1,15 @@
 #[macro_use]
 extern crate pamsm;
+extern crate rand;
 
 use pamsm::{Pam, PamData, PamError, PamFlag, PamLibExt, PamServiceModule};
+use rand::RngCore;
+use std::fs::write;
 use std::time::Instant;
 
 struct PamTime;
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct SessionStart(Instant);
 
 impl PamData for SessionStart {
@@ -14,7 +17,9 @@ impl PamData for SessionStart {
         if (flags & PamFlag::SILENT as i32) == 0 {
             println!(
                 "PamTime cleanup. Session opened for {:?}, result {}, flags {}",
-                self.0.elapsed(), status, flags
+                self.0.elapsed(),
+                status,
+                flags
             );
             if (flags & PamFlag::DATA_REPLACE as i32) != 0 {
                 println!("Pam data is being replaced");
@@ -26,10 +31,25 @@ impl PamData for SessionStart {
 impl PamServiceModule for PamTime {
     fn open_session(pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
         let now = SessionStart(Instant::now());
-        match pamh.send_data("pamtime", now) {
-            Err(e) => return e,
-            Ok(_) => (),
-        };
+        if let Err(e) = unsafe { pamh.send_data("pamtime", now) } {
+            return e;
+        }
+
+        let mut token = vec![0u8; 32];
+        rand::thread_rng().fill_bytes(&mut token);
+        let res = pamh.send_bytes(
+            "pamtime_token",
+            token,
+            Some(|token, _, _, _| {
+                if let Err(e) = write(".token.bin", token) {
+                    println!("Error persisting token : {:?}", e);
+                }
+            }),
+        );
+
+        if let Err(e) = res {
+            return e;
+        }
 
         PamError::SUCCESS
     }
@@ -55,9 +75,9 @@ impl PamServiceModule for PamTime {
             Err(e) => return e,
         };
 
-        let s : SessionStart = match unsafe { pamh.retrieve_data("pamtime") } {
+        let s: SessionStart = match unsafe { pamh.retrieve_data("pamtime") } {
             Err(e) => return e,
-            Ok(tref) => tref
+            Ok(tref) => tref,
         };
 
         if user.to_str().unwrap_or("") == "root" && s.0.elapsed().as_secs() < 60 {

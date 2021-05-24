@@ -26,7 +26,7 @@ struct PamByteData {
 /// use pamsm::{Pam, PamData, PamError, PamFlag};
 /// use std::fs::write;
 ///
-/// struct Token([u8; 128]);
+/// struct Token([u8; 32]);
 ///
 /// impl PamData for Token {
 ///     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
