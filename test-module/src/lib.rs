@@ -2,7 +2,7 @@
 extern crate pamsm;
 extern crate rand;
 
-use pamsm::{Pam, PamData, PamError, PamFlag, PamLibExt, PamServiceModule};
+use pamsm::{Pam, PamData, PamError, PamFlags, PamLibExt, PamServiceModule};
 use rand::RngCore;
 use std::fs::write;
 use std::time::Instant;
@@ -13,15 +13,15 @@ struct PamTime;
 struct SessionStart(Instant);
 
 impl PamData for SessionStart {
-    fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
-        if (flags & PamFlag::SILENT as i32) == 0 {
+    fn cleanup(&self, _pam: Pam, flags: PamFlags, status: PamError) {
+        if !flags.contains(PamFlags::SILENT) {
             println!(
-                "PamTime cleanup. Session opened for {:?}, result {}, flags {}",
+                "PamTime cleanup. Session opened for {:?}, result {}, flags {:?}",
                 self.0.elapsed(),
                 status,
                 flags
             );
-            if (flags & PamFlag::DATA_REPLACE as i32) != 0 {
+            if flags.contains(PamFlags::DATA_REPLACE) {
                 println!("Pam data is being replaced");
             }
         }
@@ -29,7 +29,7 @@ impl PamData for SessionStart {
 }
 
 impl PamServiceModule for PamTime {
-    fn open_session(pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
+    fn open_session(pamh: Pam, _flags: PamFlags, _args: Vec<String>) -> PamError {
         let now = SessionStart(Instant::now());
         if let Err(e) = unsafe { pamh.send_data("pamtime", now) } {
             return e;
@@ -54,11 +54,11 @@ impl PamServiceModule for PamTime {
         PamError::SUCCESS
     }
 
-    fn close_session(_pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
+    fn close_session(_pamh: Pam, _flags: PamFlags, _args: Vec<String>) -> PamError {
         PamError::SUCCESS
     }
 
-    fn authenticate(pamh: Pam, _flags: PamFlag, _args: Vec<String>) -> PamError {
+    fn authenticate(pamh: Pam, _flags: PamFlags, _args: Vec<String>) -> PamError {
         // If you need password here, that works like this:
         //
         //  let pass = match pamh.get_authtok(None) {

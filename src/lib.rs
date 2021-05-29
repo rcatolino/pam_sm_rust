@@ -8,12 +8,12 @@
 //! #[macro_use] extern crate pamsm;
 //! extern crate time;
 //!
-//! use pamsm::{PamServiceModule, Pam, PamFlag, PamError};
+//! use pamsm::{PamServiceModule, Pam, PamFlags, PamError};
 //!
 //! struct PamTime;
 //!
 //! impl PamServiceModule for PamTime {
-//!     fn authenticate(pamh: Pam, _: PamFlag, args: Vec<String>) -> PamError {
+//!     fn authenticate(pamh: Pam, _: PamFlags, args: Vec<String>) -> PamError {
 //!         let hour = time::OffsetDateTime::now_utc().hour();
 //!         if hour != 4 {
 //!             // Only allow authentication when it's 4 AM
@@ -26,15 +26,17 @@
 //!
 //! pam_module!(PamTime);
 //! ```
+#[macro_use]
+extern crate bitflags;
 
 #[cfg(feature = "libpam")]
 mod libpam;
 mod pam;
 mod pam_types;
 
-pub use pam::{Pam, PamError, PamFlag, PamServiceModule};
+pub use pam::{Pam, PamError, PamFlags, PamServiceModule};
 
 #[cfg(feature = "libpam")]
-pub use libpam::{PamData, PamCleanupCb, PamLibExt, PamResult};
+pub use libpam::{PamCleanupCb, PamData, PamLibExt, PamResult};
 #[cfg(feature = "libpam")]
 pub use pam_types::PamMsgStyle;

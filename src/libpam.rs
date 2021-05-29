@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use pam::{Pam, PamError, PamFlag};
+use pam::{Pam, PamError, PamFlags};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 use std::ffi::{CStr, CString, NulError};
 use std::ops::Deref;
@@ -10,7 +10,7 @@ use std::ptr;
 
 pub type PamResult<T> = Result<T, PamError>;
 /// Prototype of the callback used with [`PamLibExt::send_bytes`]
-pub type PamCleanupCb = fn(&Vec<u8>, Pam, i32, PamError);
+pub type PamCleanupCb = fn(&Vec<u8>, Pam, PamFlags, PamError);
 
 #[derive(Clone)]
 struct PamByteData {
@@ -23,18 +23,18 @@ struct PamByteData {
 /// # Example
 /// ```
 /// extern crate pamsm;
-/// use pamsm::{Pam, PamData, PamError, PamFlag};
+/// use pamsm::{Pam, PamData, PamError, PamFlags};
 /// use std::fs::write;
 ///
 /// struct Token([u8; 32]);
 ///
 /// impl PamData for Token {
-///     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
-///         if PamFlag::DATA_REPLACE as i32 & flags == 0 && status == PamError::SUCCESS {
+///     fn cleanup(&self, _pam: Pam, flags: PamFlags, status: PamError) {
+///         if !flags.contains(PamFlags::DATA_REPLACE) && status == PamError::SUCCESS {
 ///             match write(".token.bin", self.0) {
 ///                 Ok(_) => (),
 ///                 Err(err) => {
-///                     if PamFlag::SILENT as i32 & flags == 0 {
+///                     if !flags.contains(PamFlags::SILENT) {
 ///                         println!("Error persisting token : {:?}", err);
 ///                     }
 ///                 }
@@ -46,11 +46,11 @@ struct PamByteData {
 pub trait PamData {
     /// The cleanup method will be called before the data is dropped by pam.
     /// See `pam_set_data (3)`
-    fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
+    fn cleanup(&self, _pam: Pam, _flags: PamFlags, _status: PamError) {}
 }
 
 impl PamData for PamByteData {
-    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+    fn cleanup(&self, pam: Pam, flags: PamFlags, status: PamError) {
         if let Some(cb) = self.cb {
             (cb)(&self.data, pam, flags, status);
         }
@@ -62,7 +62,7 @@ impl<T: PamData, U> PamData for U
 where
     U: Deref<Target = T>,
 {
-    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+    fn cleanup(&self, pam: Pam, flags: PamFlags, status: PamError) {
         T::cleanup(&*self, pam, flags, status)
     }
 }
@@ -368,7 +368,7 @@ impl PamLibExt for Pam {
         data: Vec<u8>,
         cb: Option<PamCleanupCb>,
     ) -> PamResult<()> {
-        let data_cb = PamByteData { data, cb };
+        let data_cb = PamByteData { cb, data };
         unsafe { self.send_data(module_name, data_cb) }
     }
 
@@ -382,10 +382,11 @@ unsafe extern "C" fn pam_data_cleanup<T: PamData + Clone + Send>(
     data: *mut c_void,
     error_status: c_int,
 ) {
-    let mut flags = 0i32;
-    flags |= error_status & PamFlag::DATA_REPLACE as i32;
-    flags |= error_status & PamFlag::SILENT as i32;
-    Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
+    Box::from_raw(data as *mut T).cleanup(
+        Pam(handle),
+        PamFlags::from_bits_truncate(error_status),
+        PamError::new(error_status & 0xff),
+    );
 }
 
 unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
