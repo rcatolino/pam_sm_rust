@@ -1,14 +1,71 @@
 #![allow(dead_code)]
-#![allow(non_camel_case_types)]
 
-use pam::{Pam, PamError};
+use pam::{Pam, PamError, PamFlag};
 use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 use std::ffi::{CStr, CString, NulError};
+use std::ops::Deref;
 use std::option::Option;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
 pub type PamResult<T> = Result<T, PamError>;
+/// Prototype of the callback used with [`PamLibExt::send_bytes`]
+pub type PamCleanupCb = fn(&Vec<u8>, Pam, i32, PamError);
+
+#[derive(Clone)]
+struct PamByteData {
+    cb: Option<PamCleanupCb>,
+    data: Vec<u8>,
+}
+
+/// Trait to implement for data stored with pam using [`PamLibExt::send_data`]
+/// in order to provide a cleanup callback.
+/// # Example
+/// ```
+/// extern crate pamsm;
+/// use pamsm::{Pam, PamData, PamError, PamFlag};
+/// use std::fs::write;
+///
+/// struct Token([u8; 32]);
+///
+/// impl PamData for Token {
+///     fn cleanup(&self, _pam: Pam, flags: i32, status: PamError) {
+///         if PamFlag::DATA_REPLACE as i32 & flags == 0 && status == PamError::SUCCESS {
+///             match write(".token.bin", self.0) {
+///                 Ok(_) => (),
+///                 Err(err) => {
+///                     if PamFlag::SILENT as i32 & flags == 0 {
+///                         println!("Error persisting token : {:?}", err);
+///                     }
+///                 }
+///             };
+///         }
+///     }
+/// }
+/// ```
+pub trait PamData {
+    /// The cleanup method will be called before the data is dropped by pam.
+    /// See `pam_set_data (3)`
+    fn cleanup(&self, _pam: Pam, _flags: i32, _status: PamError) {}
+}
+
+impl PamData for PamByteData {
+    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+        if let Some(cb) = self.cb {
+            (cb)(&self.data, pam, flags, status);
+        }
+    }
+}
+
+/// Blanket implementation for types that implement `Deref<T>` when `T` implements `PamData`.
+impl<T: PamData, U> PamData for U
+where
+    U: Deref<Target = T>,
+{
+    fn cleanup(&self, pam: Pam, flags: i32, status: PamError) {
+        T::cleanup(&*self, pam, flags, status)
+    }
+}
 
 impl PamError {
     fn to_result<T>(self, ok: T) -> PamResult<T> {
@@ -44,8 +101,6 @@ impl Pam {
             r.to_result(Some(unsafe { CStr::from_ptr(raw_item as *const c_char) }))
         }
     }
-
-
 }
 
 /// Extension trait over `Pam`, usually provided by the `libpam` shared library.
@@ -90,6 +145,55 @@ pub trait PamLibExt: private::Sealed {
     /// - `NAME=` will set variable `NAME` to an empty value
     /// - `NAME` will unset the variable `NAME`
     fn putenv(&self, name_value: &str) -> PamResult<()>;
+
+    /// Send data to be stored by the pam library under the name `module_name`.
+    /// The data can then be retrieved from a different
+    /// callback in this module, or even by a different module
+    /// using [`retrieve_data<T>`][Self::retrieve_data].
+    ///
+    /// When this method is called a second time with the same `module_name`, the method
+    /// [`PamData::cleanup`] is called on the data previously stored.
+    /// The same happens when the application calls `pam_end (3)`
+    ///
+    /// If your data can be converted into / from [`Vec<u8>`][std::vec::Vec]
+    /// you should consider using the [`send_bytes`][Self::send_bytes] method instead.
+    ///
+    /// # Safety
+    /// This method should not be used if the [`send_bytes`][Self::send_bytes] method is also used
+    /// with the same `module_name`.
+    unsafe fn send_data<T: PamData + Clone + Send>(
+        &self,
+        module_name: &str,
+        data: T,
+    ) -> PamResult<()>;
+
+    /// Retrieve data previously stored with [`send_data<T>`][Self::send_data].
+    ///
+    /// Note that the result is a _copy_ of the data and not a shared reference,
+    /// which differs from the behavior of the underlying `pam_get_data (3)` function.
+    ///
+    /// If you want to share the data instead you can wrap it in [`Arc`][std::sync::Arc].
+    /// # Safety
+    /// The type parameter `T` must be the same as the one used in
+    /// [`send_data<T>`][Self::send_data] with the name `module_name`.
+    ///
+    /// If the data was stored with [`send_bytes`][Self::send_bytes] you must use
+    /// [`retrieve_bytes`][Self::retrieve_bytes] instead.
+    unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T>;
+
+    /// Similar to [`send_data`][Self::send_data], but only works with [`Vec<u8>`][std::vec::Vec].
+    /// The PamData trait doesn't have to be implemented on the data, a callback can be passed
+    /// as an argument instead.
+    fn send_bytes(
+        &self,
+        module_name: &str,
+        data: Vec<u8>,
+        cb: Option<PamCleanupCb>,
+    ) -> PamResult<()>;
+
+    /// Retrieve bytes previously stored with [`send_bytes`][Self::send_bytes].
+    /// The result is a clone of the data.
+    fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>>;
 }
 
 impl From<NulError> for PamError {
@@ -102,7 +206,7 @@ impl PamLibExt for Pam {
     fn get_user(&self, prompt: Option<&str>) -> PamResult<Option<&CStr>> {
         let cprompt = match prompt {
             None => None,
-            Some(p) => Some(CString::new(p)?)
+            Some(p) => Some(CString::new(p)?),
         };
         let mut raw_user: *const c_char = ptr::null();
         let r = unsafe {
@@ -216,9 +320,7 @@ impl PamLibExt for Pam {
 
     fn getenv(&self, name: &str) -> PamResult<Option<&CStr>> {
         let cname = CString::new(name)?;
-        let cenv = unsafe {
-            pam_getenv(self.0, cname.as_ptr())
-        };
+        let cenv = unsafe { pam_getenv(self.0, cname.as_ptr()) };
 
         if cenv.is_null() {
             Ok(None)
@@ -229,10 +331,61 @@ impl PamLibExt for Pam {
 
     fn putenv(&self, name_value: &str) -> PamResult<()> {
         let cenv = CString::new(name_value)?;
-        unsafe {
-            PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(())
-        }
+        unsafe { PamError::new(pam_putenv(self.0, cenv.as_ptr())).to_result(()) }
     }
+
+    unsafe fn send_data<T: PamData + Clone + Send>(
+        &self,
+        module_name: &str,
+        data: T,
+    ) -> PamResult<()> {
+        // The data has to be allocated on the heap because it will outlive the call stack.
+        let data_copy = Box::new(data);
+        PamError::new(pam_set_data(
+            self.0,
+            CString::new(module_name)?.as_ptr(),
+            Box::into_raw(data_copy) as *mut c_void,
+            Some(pam_data_cleanup::<T>),
+        ))
+        .to_result(())
+    }
+
+    unsafe fn retrieve_data<T: PamData + Clone + Send>(&self, module_name: &str) -> PamResult<T> {
+        let mut data_ptr: *const c_void = ptr::null();
+        // pam_get_data should be safe as long as T is the type that what used in send_data.
+        PamError::new(pam_get_data(
+            self.0,
+            CString::new(module_name)?.as_ptr(),
+            &mut data_ptr,
+        ))
+        .to_result(data_ptr as *const T)
+        .map(|ptr| (*ptr).clone()) // pam guaranties the data is valid when SUCCESS is returned.
+    }
+
+    fn send_bytes(
+        &self,
+        module_name: &str,
+        data: Vec<u8>,
+        cb: Option<PamCleanupCb>,
+    ) -> PamResult<()> {
+        let data_cb = PamByteData { data, cb };
+        unsafe { self.send_data(module_name, data_cb) }
+    }
+
+    fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>> {
+        unsafe { self.retrieve_data::<PamByteData>(module_name) }.map(|data_cb| data_cb.data)
+    }
+}
+
+unsafe extern "C" fn pam_data_cleanup<T: PamData + Clone + Send>(
+    handle: PamHandle,
+    data: *mut c_void,
+    error_status: c_int,
+) {
+    let mut flags = 0i32;
+    flags |= error_status & PamFlag::DATA_REPLACE as i32;
+    flags |= error_status & PamFlag::SILENT as i32;
+    Box::from_raw(data as *mut T).cleanup(Pam(handle), flags, PamError::new(error_status & 0xff));
 }
 
 unsafe fn set_item(pamh: PamHandle, item_type: PamItemType, item: *const c_void) -> PamResult<()> {
@@ -253,7 +406,7 @@ extern "C" {
         pamh: PamHandle,
         module_data_name: *const c_char,
         data: *mut c_void,
-        cleanup: Option<extern "C" fn(arg1: PamHandle, arg2: *mut c_void, arg3: c_int)>,
+        cleanup: Option<unsafe extern "C" fn(_: PamHandle, _: *mut c_void, _: c_int)>,
     ) -> c_int;
     pub fn pam_get_data(
         pamh: PamHandle,

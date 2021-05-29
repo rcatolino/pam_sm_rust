@@ -4,8 +4,8 @@ version = "0.1.0"
 authors = ["rca <raphael.catolino@gmail.com>"]
 
 [dependencies]
-time = "^0.1"
 pamsm = { path = "../", features = ["libpam"] }
+rand = "0.8"
 
 [lib]
 crate-type = ["cdylib"]
