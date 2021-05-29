@@ -9,15 +9,17 @@ use std::fmt;
 /// Opaque PAM handle, with additional native methods available via `PamLibExt`.
 pub struct Pam(pub(crate) PamHandle);
 
-pub enum PamFlag {
-    DATA_REPLACE = 0x2000_0000,
-    SILENT = 0x8000,
-    PAM_DISALLOW_NULL_AUTHTOK = 0x0001,
-    ESTABLISH_CRED = 0x0002,
-    DELETE_CRED = 0x0004,
-    REINITIALIZE_CRED = 0x0008,
-    REFRESH_CRED = 0x0010,
-    CHANGE_EXPIRED_AUTHTOK = 0x0020,
+bitflags! {
+    pub struct PamFlags : i32 {
+        const DATA_REPLACE = 0x2000_0000;
+        const SILENT = 0x8000;
+        const DISALLOW_NULL_AUTHTOK = 0x0001;
+        const ESTABLISH_CRED = 0x0002;
+        const DELETE_CRED = 0x0004;
+        const REINITIALIZE_CRED = 0x0008;
+        const REFRESH_CRED = 0x0010;
+        const CHANGE_EXPIRED_AUTHTOK = 0x0020;
+    }
 }
 
 impl fmt::Display for PamError {
@@ -89,27 +91,27 @@ i32_enum! {
 /// You can override functions depending on what kind of module you implement.
 /// See the respective pam_sm_* man pages for documentation.
 pub trait PamServiceModule {
-    fn open_session(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn open_session(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn close_session(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn close_session(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn authenticate(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn authenticate(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn setcred(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn setcred(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn acct_mgmt(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn acct_mgmt(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 
-    fn chauthtok(_: Pam, _: PamFlag, _: Vec<String>) -> PamError {
+    fn chauthtok(_: Pam, _: PamFlags, _: Vec<String>) -> PamError {
         PamError::SERVICE_ERR
     }
 }
@@ -146,7 +148,7 @@ macro_rules! pam_module {
                 #[doc(hidden)]
                 pub unsafe extern "C" fn $pam_cb(
                     pamh: pamsm::Pam,
-                    flags: pamsm::PamFlag,
+                    flags: i32,
                     argc: usize,
                     argv: *const *const u8,
                 ) -> pamsm::PamError {
@@ -160,7 +162,7 @@ macro_rules! pam_module {
                             Err(_) => return pamsm::PamError::SERVICE_ERR,
                         };
                     }
-                    <$pamsm_ty>::$rust_cb(pamh, flags, args)
+                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args)
                 }
             };
         }
