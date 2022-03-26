@@ -131,6 +131,9 @@ pub trait PamLibExt: private::Sealed {
     /// Get the remote username.
     fn get_ruser(&self) -> PamResult<Option<&CStr>>;
 
+    /// Get the service name.
+    fn get_service(&self) -> PamResult<Option<&CStr>>;
+
     /// Prompt the user for custom input.
     /// Returns PamError::SERVICE_ERR if the prompt contains any null byte
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>>;
@@ -274,6 +277,10 @@ impl PamLibExt for Pam {
 
     fn get_ruser(&self) -> PamResult<Option<&CStr>> {
         self.get_cstr_item(PamItemType::RUSER)
+    }
+
+    fn get_service(&self) -> PamResult<Option<&CStr>> {
+        self.get_cstr_item(PamItemType::SERVICE)
     }
 
     fn conv(&self, prompt: Option<&str>, style: PamMsgStyle) -> PamResult<Option<&CStr>> {
