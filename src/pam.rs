@@ -148,21 +148,21 @@ macro_rules! pam_module {
                 #[doc(hidden)]
                 pub unsafe extern "C" fn $pam_cb(
                     pamh: pamsm::Pam,
-                    flags: i32,
-                    argc: usize,
+                    flags: std::os::raw::c_int,
+                    argc: std::os::raw::c_int,
                     argv: *const *const u8,
-                ) -> pamsm::PamError {
+                ) -> std::os::raw::c_int {
                     use std::ffi::CStr;
                     use std::os::raw::c_char;
 
-                    let mut args = Vec::<String>::with_capacity(argc);
+                    let mut args = Vec::<String>::with_capacity(argc as usize);
                     for count in 0..(argc as isize) {
                         match { CStr::from_ptr(*argv.offset(count) as *const c_char).to_str() } {
                             Ok(s) => args.push(s.to_owned()),
-                            Err(_) => return pamsm::PamError::SERVICE_ERR,
+                            Err(_) => return pamsm::PamError::SERVICE_ERR as std::os::raw::c_int,
                         };
                     }
-                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args)
+                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags as i32), args) as std::os::raw::c_int
                 }
             };
         }
