@@ -8,7 +8,7 @@ use std::fmt;
 use std::os::raw::c_int;
 
 /// Opaque PAM handle, with additional native methods available via `PamLibExt`.
-#[repr(C)]
+#[repr(transparent)]
 pub struct Pam(pub(crate) PamHandle);
 
 bitflags! {
