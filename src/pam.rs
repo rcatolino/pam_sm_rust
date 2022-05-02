@@ -5,12 +5,14 @@
 
 use pam_types::PamHandle;
 use std::fmt;
+use std::os::raw::c_int;
 
 /// Opaque PAM handle, with additional native methods available via `PamLibExt`.
+#[repr(transparent)]
 pub struct Pam(pub(crate) PamHandle);
 
 bitflags! {
-    pub struct PamFlags : i32 {
+    pub struct PamFlags : c_int {
         const DATA_REPLACE = 0x2000_0000;
         const SILENT = 0x8000;
         const DISALLOW_NULL_AUTHTOK = 0x0001;
@@ -28,7 +30,7 @@ impl fmt::Display for PamError {
     }
 }
 
-macro_rules! i32_enum {
+macro_rules! int_enum {
     ( $name:ident ($ukey:ident = $uvalue:expr) {
         $( $key:ident = $value:expr ),*
     }) => {
@@ -39,7 +41,7 @@ macro_rules! i32_enum {
         }
         impl $name {
             #[cfg(feature = "libpam")]
-            pub(crate) fn new(r: i32) -> $name {
+            pub(crate) fn new(r: c_int) -> $name {
                 match r {
                     $( $value => $name::$key, )*
                     _ => $name::$ukey,
@@ -49,7 +51,7 @@ macro_rules! i32_enum {
     }
 }
 
-i32_enum! {
+int_enum! {
     PamError (UNKNOWN_RESULT = -1) {
         SUCCESS    = 0,		/* Successful function return */
         OPEN_ERR   = 1,		/* dlopen() failure when dynamically */
@@ -150,19 +152,27 @@ macro_rules! pam_module {
                     pamh: pamsm::Pam,
                     flags: std::os::raw::c_int,
                     argc: std::os::raw::c_int,
-                    argv: *const *const u8,
+                    argv: *const *const std::os::raw::c_char,
                 ) -> std::os::raw::c_int {
-                    use std::ffi::CStr;
-                    use std::os::raw::c_char;
+                    use std::os::raw::c_int;
+                    if argc < 0 {
+                        return pamsm::PamError::SERVICE_ERR as std::os::raw::c_int;
+                    }
 
                     let mut args = Vec::<String>::with_capacity(argc as usize);
                     for count in 0..(argc as isize) {
-                        match { CStr::from_ptr(*argv.offset(count) as *const c_char).to_str() } {
+                        match {
+                            std::ffi::CStr::from_ptr(
+                                *argv.offset(count) as *const std::os::raw::c_char
+                            )
+                            .to_str()
+                        } {
                             Ok(s) => args.push(s.to_owned()),
-                            Err(_) => return pamsm::PamError::SERVICE_ERR as std::os::raw::c_int,
+                            Err(_) => return pamsm::PamError::SERVICE_ERR as c_int,
                         };
                     }
-                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags as i32), args) as std::os::raw::c_int
+                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args)
+                        as c_int
                 }
             };
         }
