@@ -63,7 +63,7 @@ where
     U: Deref<Target = T>,
 {
     fn cleanup(&self, pam: Pam, flags: PamFlags, status: PamError) {
-        T::cleanup(&*self, pam, flags, status)
+        T::cleanup(self, pam, flags, status)
     }
 }
 

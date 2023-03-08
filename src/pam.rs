@@ -20,7 +20,7 @@ impl Pam {
     ///     let borrowed = pamh.as_send_ref();
     ///     s.spawn(move || {
     ///          let pamh: &Pam = borrowed.into();
-    ///     }).join().unwrap();
+    ///     });
     /// });
     /// # }
     /// ```
@@ -33,10 +33,10 @@ impl Pam {
     ///     let shared_2 = shared_1.clone();
     ///     s.spawn(move || {
     ///          let pamh: &Pam = &*shared_1.lock().unwrap();
-    ///     }).join().unwrap();
+    ///     });
     ///     s.spawn(move || {
     ///          let pamh: &Pam = &*shared_2.lock().unwrap();
-    ///     }).join().unwrap();
+    ///     });
     /// });
     /// # }
     /// ```
@@ -236,8 +236,7 @@ macro_rules! pam_module {
                             Err(_) => return pamsm::PamError::SERVICE_ERR as c_int,
                         };
                     }
-                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args)
-                        as c_int
+                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args) as c_int
                 }
             };
         }
