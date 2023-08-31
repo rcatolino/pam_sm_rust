@@ -11,6 +11,36 @@ use std::os::raw::c_int;
 #[repr(transparent)]
 pub struct Pam(pub(crate) PamHandle);
 
+impl Pam {
+    pub fn as_send_ref(&mut self) -> SendPamRef<'_> {
+        SendPamRef(self)
+    }
+}
+
+impl<'a> From<&'a mut Pam> for SendPamRef<'a> {
+    fn from(value: &'a mut Pam) -> Self {
+        Self(value)
+    }
+}
+
+pub struct SendPamRef<'a>(&'a mut Pam);
+
+unsafe impl<'a> Send for SendPamRef<'a> {}
+
+impl std::ops::Deref for SendPamRef<'_> {
+    type Target = Pam;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> From<SendPamRef<'a>> for &'a mut Pam {
+    fn from(value: SendPamRef<'a>) -> Self {
+        value.0
+    }
+}
+
 bitflags! {
     pub struct PamFlags : c_int {
         const DATA_REPLACE = 0x2000_0000;
