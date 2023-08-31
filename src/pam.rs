@@ -12,6 +12,34 @@ use std::os::raw::c_int;
 pub struct Pam(pub(crate) PamHandle);
 
 impl Pam {
+    /// This allows sending the `Pam` handle to another thread.
+    /// ```rust
+    /// # use pamsm::Pam;
+    /// # fn wrapper(pamh: &mut Pam) {
+    /// std::thread::scope(|s| {
+    ///     let borrowed = pamh.as_send_ref();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = borrowed.into();
+    ///     }).join().unwrap();
+    /// });
+    /// # }
+    /// ```
+    /// Synchronized across multiple threads:
+    /// ```rust
+    /// # use pamsm::Pam;
+    /// # fn wrapper(pamh: &mut Pam) {
+    /// std::thread::scope(|s| {
+    ///     let shared_1 = std::sync::Arc::new(std::sync::Mutex::new(pamh.as_send_ref()));
+    ///     let shared_2 = shared_1.clone();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = &*shared_1.lock().unwrap();
+    ///     }).join().unwrap();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = &*shared_2.lock().unwrap();
+    ///     }).join().unwrap();
+    /// });
+    /// # }
+    /// ```
     pub fn as_send_ref(&mut self) -> SendPamRef<'_> {
         SendPamRef(self)
     }
@@ -36,6 +64,12 @@ impl std::ops::Deref for SendPamRef<'_> {
 }
 
 impl<'a> From<SendPamRef<'a>> for &'a mut Pam {
+    fn from(value: SendPamRef<'a>) -> Self {
+        value.0
+    }
+}
+
+impl<'a> From<SendPamRef<'a>> for &'a Pam {
     fn from(value: SendPamRef<'a>) -> Self {
         value.0
     }
