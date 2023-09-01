@@ -51,6 +51,7 @@ impl<'a> From<&'a mut Pam> for PamSendRef<'a> {
     }
 }
 
+/// This sendable reference to [`Pam`] can be created via [`Pam::as_send_ref`] or `From`/`Into`.
 pub struct PamSendRef<'a>(&'a mut Pam);
 
 unsafe impl<'a> Send for PamSendRef<'a> {}
