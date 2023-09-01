@@ -11,6 +11,71 @@ use std::os::raw::c_int;
 #[repr(transparent)]
 pub struct Pam(pub(crate) PamHandle);
 
+impl Pam {
+    /// This allows sending the `Pam` handle to another thread.
+    /// ```rust
+    /// # use pamsm::Pam;
+    /// # fn wrapper(pamh: &mut Pam) {
+    /// std::thread::scope(|s| {
+    ///     let borrowed = pamh.as_send_ref();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = borrowed.into();
+    ///     }).join().unwrap();
+    /// });
+    /// # }
+    /// ```
+    /// Synchronized across multiple threads:
+    /// ```rust
+    /// # use pamsm::Pam;
+    /// # fn wrapper(pamh: &mut Pam) {
+    /// std::thread::scope(|s| {
+    ///     let shared_1 = std::sync::Arc::new(std::sync::Mutex::new(pamh.as_send_ref()));
+    ///     let shared_2 = shared_1.clone();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = &*shared_1.lock().unwrap();
+    ///     }).join().unwrap();
+    ///     s.spawn(move || {
+    ///          let pamh: &Pam = &*shared_2.lock().unwrap();
+    ///     }).join().unwrap();
+    /// });
+    /// # }
+    /// ```
+    pub fn as_send_ref(&mut self) -> PamSendRef<'_> {
+        PamSendRef(self)
+    }
+}
+
+impl<'a> From<&'a mut Pam> for PamSendRef<'a> {
+    fn from(value: &'a mut Pam) -> Self {
+        Self(value)
+    }
+}
+
+/// This sendable reference to [`Pam`] can be created via [`Pam::as_send_ref`] or `From`/`Into`.
+pub struct PamSendRef<'a>(&'a mut Pam);
+
+unsafe impl<'a> Send for PamSendRef<'a> {}
+
+impl std::ops::Deref for PamSendRef<'_> {
+    type Target = Pam;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> From<PamSendRef<'a>> for &'a mut Pam {
+    fn from(value: PamSendRef<'a>) -> Self {
+        value.0
+    }
+}
+
+impl<'a> From<PamSendRef<'a>> for &'a Pam {
+    fn from(value: PamSendRef<'a>) -> Self {
+        value.0
+    }
+}
+
 bitflags! {
     pub struct PamFlags : c_int {
         const DATA_REPLACE = 0x2000_0000;
