@@ -40,22 +40,22 @@ impl Pam {
     /// });
     /// # }
     /// ```
-    pub fn as_send_ref(&mut self) -> SendPamRef<'_> {
-        SendPamRef(self)
+    pub fn as_send_ref(&mut self) -> PamSendRef<'_> {
+        PamSendRef(self)
     }
 }
 
-impl<'a> From<&'a mut Pam> for SendPamRef<'a> {
+impl<'a> From<&'a mut Pam> for PamSendRef<'a> {
     fn from(value: &'a mut Pam) -> Self {
         Self(value)
     }
 }
 
-pub struct SendPamRef<'a>(&'a mut Pam);
+pub struct PamSendRef<'a>(&'a mut Pam);
 
-unsafe impl<'a> Send for SendPamRef<'a> {}
+unsafe impl<'a> Send for PamSendRef<'a> {}
 
-impl std::ops::Deref for SendPamRef<'_> {
+impl std::ops::Deref for PamSendRef<'_> {
     type Target = Pam;
 
     fn deref(&self) -> &Self::Target {
@@ -63,14 +63,14 @@ impl std::ops::Deref for SendPamRef<'_> {
     }
 }
 
-impl<'a> From<SendPamRef<'a>> for &'a mut Pam {
-    fn from(value: SendPamRef<'a>) -> Self {
+impl<'a> From<PamSendRef<'a>> for &'a mut Pam {
+    fn from(value: PamSendRef<'a>) -> Self {
         value.0
     }
 }
 
-impl<'a> From<SendPamRef<'a>> for &'a Pam {
-    fn from(value: SendPamRef<'a>) -> Self {
+impl<'a> From<PamSendRef<'a>> for &'a Pam {
+    fn from(value: PamSendRef<'a>) -> Self {
         value.0
     }
 }
