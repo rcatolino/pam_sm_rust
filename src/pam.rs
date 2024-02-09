@@ -236,7 +236,7 @@ macro_rules! pam_module {
                             Err(_) => return pamsm::PamError::SERVICE_ERR as c_int,
                         };
                     }
-                    <$pamsm_ty>::$rust_cb(pamh, PamFlags::from_bits_unchecked(flags), args) as c_int
+                    <$pamsm_ty>::$rust_cb(pamh, pamsm::PamFlags::from_bits_unchecked(flags), args) as c_int
                 }
             };
         }
