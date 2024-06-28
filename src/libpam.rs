@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use pam::{Pam, PamError, PamFlags};
-use pam_types::{PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
+use pam_types::{LogLvl, PamConv, PamHandle, PamItemType, PamMessage, PamMsgStyle, PamResponse};
 use std::ffi::{CStr, CString, NulError};
 use std::ops::Deref;
 use std::option::Option;
@@ -197,6 +197,9 @@ pub trait PamLibExt: private::Sealed {
     /// Retrieve bytes previously stored with [`send_bytes`][Self::send_bytes].
     /// The result is a clone of the data.
     fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>>;
+
+    /// Send a message to syslog.
+    fn syslog(&self, lvl: LogLvl, msg: &str) -> PamResult<()>;
 }
 
 impl From<NulError> for PamError {
@@ -382,6 +385,15 @@ impl PamLibExt for Pam {
     fn retrieve_bytes(&self, module_name: &str) -> PamResult<Vec<u8>> {
         unsafe { self.retrieve_data::<PamByteData>(module_name) }.map(|data_cb| data_cb.data)
     }
+
+    fn syslog(&self, lvl: LogLvl, msg: &str) -> PamResult<()> {
+        let fmt = b"%s\0".as_ptr() as *const c_char;
+        let cmsg = CString::new(msg)?;
+        unsafe {
+            pam_syslog(self.0, lvl as c_int, fmt, cmsg.as_ptr());
+        }
+        Ok(())
+    }
 }
 
 unsafe extern "C" fn pam_data_cleanup<T: PamData + Clone + Send>(
@@ -428,4 +440,6 @@ extern "C" {
         authok_ptr: *mut *const c_char,
         prompt: *const c_char,
     ) -> c_int;
+
+    pub fn pam_syslog(pamh: PamHandle, priority: c_int, fmt: *const c_char, ...) -> c_void;
 }
