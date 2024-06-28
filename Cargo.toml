@@ -1,6 +1,6 @@
 [package]
 name = "pamsm"
-version = "0.5.4"
+version = "0.5.5"
 readme = "readme.md"
 description = "Rust wrappers around PAM Service Modules functions"
 authors = ["Raphael Catolino <raphael.catolino@gmail.com>"]
