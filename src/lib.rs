@@ -39,4 +39,4 @@ pub use pam::{Pam, PamError, PamFlags, PamSendRef, PamServiceModule};
 #[cfg(feature = "libpam")]
 pub use libpam::{PamCleanupCb, PamData, PamLibExt, PamResult};
 #[cfg(feature = "libpam")]
-pub use pam_types::PamMsgStyle;
+pub use pam_types::{LogLvl, PamMsgStyle};
