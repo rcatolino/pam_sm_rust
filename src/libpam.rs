@@ -387,9 +387,10 @@ impl PamLibExt for Pam {
     }
 
     fn syslog(&self, lvl: LogLvl, msg: &str) -> PamResult<()> {
+        let fmt = b"%s\0".as_ptr() as *const c_char;
         let cmsg = CString::new(msg)?;
         unsafe {
-            pam_syslog(self.0, lvl as c_int, cmsg.as_ptr());
+            pam_syslog(self.0, lvl as c_int, fmt, cmsg.as_ptr());
         }
         Ok(())
     }
